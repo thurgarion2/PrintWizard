@@ -19,7 +19,7 @@ def executeExample(path : str, agentPath : str):
     command(f"java -javaagent:{agentPath} -cp {path} Main", False)
 
 def command(cmd : str, display=True):
-    process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(cmd, shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     if stdout and display:
         print(stdout)
@@ -28,12 +28,15 @@ def command(cmd : str, display=True):
 
 
 if __name__ == "__main__":
+    excluded = ["Chemistry", "Casts", "Nulls", "CaughtExceptions"]
+
     if len(sys.argv) < 1:
         print("Provide path to agent")
         sys.exit(1)
     agentPath = sys.argv[1]
     examples = Path("./JumboTrace/examples")
 
-    for example in examples.iterdir():
+    for example in filter(lambda x: x.name not in excluded,examples.iterdir()):
+        print(f"======= {example.name} ========")
         executeExample(str(example), agentPath)
 

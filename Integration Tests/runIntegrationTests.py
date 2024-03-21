@@ -1,8 +1,11 @@
 import os
 import subprocess
 
+def format_output(output):
+    return '\n'.join(output.split('\n'))
+
 def command(cmd : str, display=True):
-    process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(cmd, shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     if stdout and display:
         print(stdout)
