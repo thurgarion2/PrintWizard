@@ -16,7 +16,7 @@ def main():
 
 def executeExample(path : str, agentPath : str):
     command(f"javac -g {path}/*.java")
-    command(f"java -javaagent:{agentPath} -cp {path} Main", False)
+    command(f"java -javaagent:{agentPath} -cp {path} Main", True)
 
 def command(cmd : str, display=True):
     process = subprocess.Popen(cmd, shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -36,7 +36,11 @@ if __name__ == "__main__":
     agentPath = sys.argv[1]
     examples = Path("./JumboTrace/examples")
 
+    x = 0
     for example in filter(lambda x: x.name not in excluded,examples.iterdir()):
+        if x>4:
+            break
         print(f"======= {example.name} ========")
         executeExample(str(example), agentPath)
+        x += 1
 
