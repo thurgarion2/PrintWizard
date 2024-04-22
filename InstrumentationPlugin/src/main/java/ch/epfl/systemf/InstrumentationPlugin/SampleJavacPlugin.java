@@ -38,8 +38,10 @@ public class SampleJavacPlugin implements Plugin {
                 if(e.getKind()== TaskEvent.Kind.ANALYZE){
                     TreeHelper instr = new TreeHelper(mkTree,names, symb);
                     TraceLogger traceLogger = new PrintTraceLogger(instr);
-                    TreeInstrumenter t = new TreeInstrumenter(traceLogger, instr);
+                    NodeData nodeData = new NodeDataJson((JCTree.JCCompilationUnit)e.getCompilationUnit());
+                    TreeInstrumenter t = new TreeInstrumenter(traceLogger, nodeData, instr);
                     t.translate((JCTree.JCCompilationUnit)e.getCompilationUnit());
+                    nodeData.end();
                 }
 
             }

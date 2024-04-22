@@ -10,7 +10,7 @@ public class PrintLogger implements Logger{
     private static final Stack<Context> parent = new Stack<>();
 
     private static long eventCounter = 0;
-    private final static String fileName = "eventTrace.txt";
+    private final static String fileName = "eventTrace.csv";
 
     private final static OutputStream out;
     private final static OutputStreamWriter writer;
@@ -47,10 +47,17 @@ public class PrintLogger implements Logger{
     }
 
 
-    public static  int enter(int nodeId){
+    public static  int enterEval(int nodeId){
         long eventId = nextId();
+        print(Long.toString(eventId), Long.toString(parent()), Integer.toString(nodeId), "enterEval");
         parent.push(new Context(nodeId, eventId));
-        print(Long.toString(eventId), "enter", Integer.toString(nodeId));
+        return 0;
+    }
+
+    public static  int enterLogical(int nodeId){
+        long eventId = nextId();
+        print(Long.toString(eventId), Long.toString(parent()), Integer.toString(nodeId), "enterLogical");
+        parent.push(new Context(nodeId, eventId));
         return 0;
     }
     public  static int exitEvaluation(int nodeId, Evaluation eval){
@@ -58,11 +65,14 @@ public class PrintLogger implements Logger{
 
 
         print(Long.toString(eventId),
+                Long.toString(parent()),
                 Integer.toString(nodeId),
                 "eval",
-                eval.hasResult() ? safeToString(eval.result()) : "noResult",
-                eval.hasAssign() ? eval.varName() : "noAssign",
-                eval.hasAssign() ? safeToString(eval.value()) : "noAssign");
+                Boolean.toString(eval.hasResult()),
+                safeToString(eval.result()),
+                Boolean.toString(eval.hasAssign()),
+                safeToString(eval.varName()),
+                safeToString(eval.value()));
         return 0;
     }
 
@@ -77,9 +87,9 @@ public class PrintLogger implements Logger{
         long eventId = exitScope(nodeId);
 
         print(Long.toString(eventId),
+                Long.toString(parent()),
                 Integer.toString(nodeId),
                 "syntax",
-                Long.toString(parent()),
                 description);
         return 0;
     }

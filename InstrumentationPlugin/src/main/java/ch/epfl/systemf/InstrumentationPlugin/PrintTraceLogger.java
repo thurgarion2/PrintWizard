@@ -6,33 +6,26 @@ import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.List;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.function.Function;
 
 public class PrintTraceLogger implements TraceLogger{
     private final TreeHelper helper;
     private final TreeMaker mkTree;
-    private int nodeCounter;
 
     private final JCTree.JCExpression enterLogicalEvent;
     private final JCTree.JCExpression exitLogicalEvent;
-    private final JCTree.JCExpression enterEvent;
+    private final JCTree.JCExpression enterEval;
     private final JCTree.JCExpression exitLogEvent;
-    private final Map<Symbol.MethodSymbol, Integer> mehtodId;
 
 
     public PrintTraceLogger(TreeHelper instr) {
         this.helper = instr;
         this.mkTree = instr.mkTree;
-        this.nodeCounter = 0;
-        this.mehtodId = new HashMap<>();
-
         TreeHelper.SimpleClass printLogger = new TreeHelper.SimpleClass("ch.epfl.systemf", "PrintLogger");
 
 
 
-        this.enterEvent = helper.staticMethod(printLogger, "enter",
+        this.enterEval = helper.staticMethod(printLogger, "enterEval",
                 List.of(helper.intP)
                 , helper.intP);
         this.exitLogEvent = helper.staticMethod(printLogger,
@@ -40,7 +33,7 @@ public class PrintTraceLogger implements TraceLogger{
                 List.of(instr.intP,instr.type(helper.evaluation)),
                 helper.intP);
 
-        this.enterLogicalEvent = helper.staticMethod(printLogger, "enter",
+        this.enterLogicalEvent = helper.staticMethod(printLogger, "enterLogical",
                 List.of(helper.intP)
                 , helper.intP);
         this.exitLogicalEvent = helper.staticMethod(printLogger, "exitLogical",
@@ -49,88 +42,91 @@ public class PrintTraceLogger implements TraceLogger{
     }
 
     @Override
-    public JCTree.JCStatement logReturn(JCTree.JCReturn ret, Symbol.MethodSymbol currMethod) {
-        ret.expr  = enterExitEvent(ret.expr, currMethod.getReturnType(), currMethod);
+    public JCTree.JCStatement logReturn(NodeId nodeId, NodeId method, JCTree.JCReturn ret, Symbol.MethodSymbol currMethod) {
+        ret.expr  = enterExitEvent(nodeId,
+                ret.expr,
+                currMethod.getReturnType(),
+                currMethod);
+
         ret.expr = exitLogicalEvent(ret.expr,
-                methodNodeId(currMethod),
-                "exit-method",
+                method,
                 currMethod);
         return ret;
     }
 
     @Override
-    public JCTree.JCStatement logVarDecl(JCTree.JCVariableDecl varDecl, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCStatement logVarDecl(NodeId nodeId, JCTree.JCVariableDecl varDecl, Symbol.MethodSymbol currMethod) {
         if(varDecl.init==null)
             throw new IllegalArgumentException();
 
         varDecl.init = enterExitEvent(
                 varDecl.init,
                 varDecl.type,
-                nextNodeId(),
+                nodeId,
                 result -> helper.newEvaluation(false,null, true, varDecl.name.toString(),result),
                 currMethod);
         return varDecl;
     }
 
     @Override
-    public JCTree.JCStatement logExec(JCTree.JCExpressionStatement statement, Symbol.MethodSymbol currMethod) {
-        return enterExitLogicalEvent(nextNodeId(),statement, "VOID-FUN-CALL");
+    public JCTree.JCStatement logExec(NodeId nodeId, JCTree.JCExpressionStatement statement, Symbol.MethodSymbol currMethod) {
+        return enterExitLogicalEvent(nodeId,statement);
     }
 
-    private JCTree.JCExpression enterExitEvent(JCTree.JCExpression expr, Type exprType, Symbol.MethodSymbol currMethod) {
+    private JCTree.JCExpression enterExitEvent(NodeId id, JCTree.JCExpression expr, Type exprType, Symbol.MethodSymbol currMethod) {
         return enterExitEvent(expr,
                 exprType,
-                nextNodeId(),
+                id,
                 result -> helper.newEvaluation(true, result, false, null, null),
                 currMethod);
     }
 
 
     @Override
-    public JCTree.JCStatement logForLoop(JCTree.JCForLoop loop, Symbol.MethodSymbol currMethod) {
-        loop.init = enterExitLogicalEvent(nextNodeId(),loop.init, "FOR-INIT");
-        loop.body = enterExitLogicalEvent(nextNodeId(),loop.body, "FOR-BODY");
-        loop.cond = enterExitEvent(loop.cond, helper.boolP, currMethod);
-        return enterExitLogicalEvent(nextNodeId(),loop, "FOR-LOOP");
+    public JCTree.JCStatement logForLoop(NodeId forLoop, NodeId init, NodeId iter, NodeId cond,  JCTree.JCForLoop loop, Symbol.MethodSymbol currMethod) {
+        loop.init = enterExitLogicalEvent(init,loop.init);
+        loop.body = enterExitLogicalEvent(iter,loop.body);
+        loop.cond = enterExitEvent(cond, loop.cond, helper.boolP, currMethod);
+        return enterExitLogicalEvent(forLoop,loop);
     }
 
     @Override
-    public JCTree.JCStatement logWhileLoop(JCTree.JCWhileLoop loop, Symbol.MethodSymbol currMethod) {
-        loop.body = enterExitLogicalEvent(nextNodeId(),loop.body, "WHILE-BODY");
-        loop.cond = enterExitEvent(loop.cond, helper.boolP, currMethod);
-        return enterExitLogicalEvent(nextNodeId(),loop, "WHILE-LOOP");
+    public JCTree.JCStatement logWhileLoop(NodeId whileLoop, NodeId iter, NodeId cond, JCTree.JCWhileLoop loop, Symbol.MethodSymbol currMethod) {
+        loop.body = enterExitLogicalEvent(iter,loop.body);
+        loop.cond = enterExitEvent(cond, loop.cond, helper.boolP, currMethod);
+        return enterExitLogicalEvent(whileLoop ,loop);
     }
 
     @Override
-    public JCTree.JCStatement logIf(JCTree.JCIf branch, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCStatement logIf(NodeId iF, NodeId cond, NodeId theN, NodeId elsE, JCTree.JCIf branch, Symbol.MethodSymbol currMethod) {
         JCTree.JCStatement then = branch.thenpart;
         JCTree.JCStatement elsePart = branch.elsepart;
         if(then!=null){
-            branch.thenpart = enterExitLogicalEvent(nextNodeId(),then,"TRUE-BRANCH");
+            branch.thenpart = enterExitLogicalEvent(theN,then);
         }
         if(elsePart!=null){
-            branch.elsepart = enterExitLogicalEvent(nextNodeId(),elsePart,"FALSE-BRANCH");
+            branch.elsepart = enterExitLogicalEvent(elsE,elsePart);
         }
 
-        branch.cond = enterExitEvent(branch.cond, helper.boolP, currMethod);
+        branch.cond = enterExitEvent(cond, branch.cond, helper.boolP, currMethod);
 
-        return enterExitLogicalEvent(nextNodeId(), branch, "IF");
+        return enterExitLogicalEvent(iF, branch);
     }
 
     @Override
-    public JCTree.JCExpression logCall(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCExpression logCall(NodeId nodeId, JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
         if(call.type.equals(helper.voidP))
             throw new IllegalArgumentException("cannot assign void to variable");
-        return enterExitEvent(call, call.type, currMethod);
+        return enterExitEvent(nodeId, call, call.type, currMethod);
     }
 
     @Override
-    public JCTree.JCExpression logUnary(JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCExpression logUnary(NodeId nodeId, JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
         JCTree.JCExpression expr = unary.getExpression();
 
         return enterExitEvent(unary,
                 unary.type,
-                nextNodeId(),
+                nodeId,
                 result -> helper.newEvaluation(true,
                         result,
                         true,
@@ -140,33 +136,31 @@ public class PrintTraceLogger implements TraceLogger{
     }
 
     @Override
-    public JCTree.JCMethodDecl logMethod(JCTree.JCMethodDecl method, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCMethodDecl logMethod(NodeId nodeId, JCTree.JCMethodDecl method, Symbol.MethodSymbol currMethod) {
         String methodName = method.name.toString();
         JCTree.JCBlock body = method.getBody();
-        int nodeId =  methodNodeId(method.sym);
-        this.mehtodId.put(currMethod,nodeId);
 
-        body.stats = enterExitLogicalEvent(nodeId, body.getStatements(), "METHOD("+methodName+")");
+        body.stats = enterExitLogicalEvent(nodeId, body.getStatements());
         return method;
     }
 
-    private List<JCTree.JCStatement> enterExitLogicalEvent(int nodeId, List<JCTree.JCStatement> stats, String event){
+    private List<JCTree.JCStatement> enterExitLogicalEvent(NodeId id, List<JCTree.JCStatement> stats){
 
         return stats
-                .prepend(enterLogical(nodeId))
-                .append(exitLogical(nodeId, event));
+                .prepend(enterLogical(id))
+                .append(exitLogical(id));
     }
 
-    private JCTree.JCStatement enterExitLogicalEvent(int nodeId, JCTree.JCStatement stat, String event){
+    private JCTree.JCStatement enterExitLogicalEvent(NodeId id, JCTree.JCStatement stat){
 
         return mkTree.Block(0, List.of(
-                enterLogical(nodeId),
+                enterLogical(id),
                 stat,
-                exitLogical(nodeId, event)
+                exitLogical(id)
         ));
     }
 
-    private JCTree.JCExpression exitLogicalEvent(JCTree.JCExpression expr, int nodeId, String description, Symbol.MethodSymbol method){
+    private JCTree.JCExpression exitLogicalEvent(JCTree.JCExpression expr, NodeId id, Symbol.MethodSymbol method){
         Symbol.VarSymbol exit = new Symbol.VarSymbol(0,
                 helper.name("----"),
                 helper.intP,
@@ -178,24 +172,24 @@ public class PrintTraceLogger implements TraceLogger{
 
         return  mkTree.LetExpr(
                 List.of(mkTree.VarDef(retValue, expr),
-                        mkTree.VarDef(exit, callExitLogical(nodeId, description))
+                        mkTree.VarDef(exit, callExitLogical(id))
                 ),
                 mkTree.Ident(retValue)
         ).setType(expr.type);
     }
 
-    private JCTree.JCStatement enterLogical(int nodeId){
-        return mkTree.Exec(callEnterLogical(nodeId));
+    private JCTree.JCStatement enterLogical(NodeId id){
+        return mkTree.Exec(callEnterLogical(id));
     }
 
-    private JCTree.JCStatement exitLogical(int nodeId, String description){
+    private JCTree.JCStatement exitLogical(NodeId id){
 
-        return mkTree.Exec(callExitLogical(nodeId, description));
+        return mkTree.Exec(callExitLogical(id));
     }
 
     private JCTree.JCExpression enterExitEvent(JCTree.JCExpression expr,
                                                Type exprType,
-                                               int nodeId,
+                                               NodeId id,
                                                Function<Symbol, JCTree.JCExpression> evaluation,
                                                Symbol.MethodSymbol method) {
 
@@ -215,10 +209,10 @@ public class PrintTraceLogger implements TraceLogger{
 
         return mkTree.LetExpr(
                 List.of(
-                        mkTree.VarDef(enter, callEnterEval(nodeId)),
+                        mkTree.VarDef(enter, callEnterEval(id)),
                         mkTree.VarDef(retValue, expr),
                         mkTree.VarDef(exit, callExitEval(
-                                nodeId,
+                                id,
                                 evaluation.apply(retValue)))
                 ),
                 mkTree.Ident(retValue)
@@ -227,35 +221,25 @@ public class PrintTraceLogger implements TraceLogger{
 
 
 
-    private JCTree.JCExpression callEnterEval(int nodeId){
-        return helper.callFun(this.enterEvent, List.of(mkTree.Literal(nodeId)));
+    private JCTree.JCExpression callEnterEval(NodeId id){
+        return helper.callFun(this.enterEval, List.of(mkTree.Literal(id.nodeId())));
     }
 
-    private JCTree.JCExpression callExitEval(int nodeId, JCTree.JCExpression eval){
+    private JCTree.JCExpression callExitEval(NodeId id, JCTree.JCExpression eval){
         return helper.callFun(this.exitLogEvent, List.of(
-                mkTree.Literal(nodeId),
+                mkTree.Literal(id.nodeId()),
                 eval));
     }
 
-    private JCTree.JCExpression callEnterLogical(int nodeId){
-        return helper.callFun(this.enterLogicalEvent, List.of(mkTree.Literal(nodeId)));
+    private JCTree.JCExpression callEnterLogical(NodeId id){
+        return helper.callFun(this.enterLogicalEvent, List.of(mkTree.Literal(id.nodeId())));
     }
 
-    private JCTree.JCExpression callExitLogical(int nodeId, String description){
+    private JCTree.JCExpression callExitLogical(NodeId id){
         return helper.callFun(this.exitLogicalEvent,
                 List.of(
-                        mkTree.Literal(nodeId),
-                        mkTree.Literal(description)));
-    }
-
-    private int nextNodeId(){
-        return nodeCounter++;
-    }
-
-    private Integer methodNodeId(Symbol.MethodSymbol method) {
-        if(!this.mehtodId.containsKey(method))
-            this.mehtodId.put(method, nextNodeId());
-        return this.mehtodId.get(method);
+                        mkTree.Literal(id.nodeId()),
+                        mkTree.Literal("")));
     }
 
 }

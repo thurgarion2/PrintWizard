@@ -3,15 +3,25 @@ package ch.epfl.systemf.InstrumentationPlugin;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeTranslator;
+
+import java.util.HashMap;
+import java.util.Map;
+
 public class TreeInstrumenter extends TreeTranslator {
     private final TraceLogger traceLogger;
+    private final NodeData createNodeData;
     private final TreeHelper helper;
     private Symbol.MethodSymbol currentMethod = null;
+    private int currentNodeId = 1;
 
-    public TreeInstrumenter(TraceLogger traceLogger, TreeHelper helper){
+    private Map<Symbol.MethodSymbol, NodeId> methodId;
+
+    public TreeInstrumenter(TraceLogger traceLogger, NodeData createNodeData, TreeHelper helper){
         super();
         this.traceLogger = traceLogger;
         this.helper = helper;
+        this.methodId = new HashMap<>();
+        this.createNodeData = createNodeData;
     }
 
     @Override
@@ -28,8 +38,14 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitApply(JCTree.JCMethodInvocation tree) {
+        NodeId id = nodeId(tree);
+        createNodeData.dataCall(id, tree);
+
         super.visitApply(tree);
-        this.result = traceLogger.logCall((JCTree.JCMethodInvocation) this.result, currentMethod);
+        this.result = traceLogger.logCall(
+                id,
+                (JCTree.JCMethodInvocation) this.result,
+                currentMethod);
     }
 
     @Override
@@ -39,7 +55,7 @@ public class TreeInstrumenter extends TreeTranslator {
 
             if(call.type.equals(helper.voidP)){
                 super.visitApply(call);
-                this.result = traceLogger.logExec(helper.mkTree.Exec((JCTree.JCExpression) this.result), currentMethod);
+                this.result = traceLogger.logExec(nodeId(tree), helper.mkTree.Exec((JCTree.JCExpression) this.result), currentMethod);
             }else{
                 super.visitExec(tree);
             }
@@ -119,14 +135,39 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitForLoop(JCTree.JCForLoop tree) {
+        NodeId forLoop = nodeId(tree);
+        NodeId init = nodeId(null);
+        NodeId iter = nodeId(tree.body);
+        NodeId cond = nodeId(tree.cond);
+
+        createNodeData.dataForLoop(forLoop, init, iter, cond, tree);
+
         super.visitForLoop(tree);
-        this.result = traceLogger.logForLoop((JCTree.JCForLoop) this.result, currentMethod);
+        this.result = traceLogger.logForLoop(
+                forLoop,
+                init,
+                iter,
+                cond,
+                (JCTree.JCForLoop) this.result,
+                currentMethod);
     }
 
     @Override
     public void visitIf(JCTree.JCIf tree) {
+        NodeId iF = nodeId(tree);
+        NodeId cond = nodeId(tree.cond);
+        NodeId theN = nodeId(tree.thenpart);
+        NodeId elsE = nodeId(tree.elsepart);
+        createNodeData.dataIf(iF, cond, theN, elsE, tree);
+
         super.visitIf(tree);
-        this.result = traceLogger.logIf((JCTree.JCIf) tree, currentMethod);
+        this.result = traceLogger.logIf(
+                iF,
+                cond,
+                theN,
+                elsE,
+                (JCTree.JCIf) this.result,
+                currentMethod);
     }
 
     @Override
@@ -150,8 +191,13 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitMethodDef(JCTree.JCMethodDecl tree) {
         this.currentMethod = tree.sym;
+        NodeId method = nodeId(tree);
+        methodId.put(tree.sym, method);
         super.visitMethodDef(tree);
-        this.result = traceLogger.logMethod((JCTree.JCMethodDecl) this.result, currentMethod);
+        this.result = traceLogger.logMethod(
+                method,
+                (JCTree.JCMethodDecl) this.result,
+                currentMethod);
     }
 
     @Override
@@ -173,8 +219,15 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitReturn(JCTree.JCReturn tree) {
+        NodeId returN = nodeId(tree);
+        createNodeData.dataReturn(returN, tree);
+
         super.visitReturn(tree);
-        this.result = traceLogger.logReturn((JCTree.JCReturn) this.result, currentMethod);
+
+        this.result = traceLogger.logReturn(
+                returN,
+                methodId.get(currentMethod),
+                (JCTree.JCReturn) this.result, currentMethod);
     }
 
     @Override
@@ -245,23 +298,46 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitUnary(JCTree.JCUnary tree) {
+        NodeId id = nodeId(tree);
+        createNodeData.dataUnary(id, tree);
+
         super.visitUnary(tree);
-        this.result = traceLogger.logUnary((JCTree.JCUnary) this.result, currentMethod);
-        int x = 0;
+        this.result = traceLogger.logUnary(
+                id,
+                (JCTree.JCUnary) this.result,
+                currentMethod);
+
     }
 
     @Override
     public void visitVarDef(JCTree.JCVariableDecl tree) {
+        NodeId id = nodeId(tree);
+        if(tree.init!=null)
+            createNodeData.dataVarDecl(id, tree);
+
         super.visitVarDef(tree);
         //we are in a method parameter
         if(tree.init==null)
             return;
-        this.result = traceLogger.logVarDecl((JCTree.JCVariableDecl) this.result, currentMethod);
+        this.result = traceLogger.logVarDecl(id,(JCTree.JCVariableDecl) this.result, currentMethod);
     }
 
     @Override
     public void visitWhileLoop(JCTree.JCWhileLoop tree) {
+        NodeId whileLoop = nodeId(tree);
+        NodeId iter = nodeId(tree.body);
+        NodeId cond = nodeId(tree.cond);
+        createNodeData.dataWhileLoop(whileLoop, iter, cond, tree);
+
         super.visitWhileLoop(tree);
-        this.result = traceLogger.logWhileLoop((JCTree.JCWhileLoop) this.result, currentMethod);
+        this.result = traceLogger.logWhileLoop(
+                whileLoop,
+                iter,
+                cond,
+                (JCTree.JCWhileLoop) this.result, currentMethod);
+    }
+
+    private NodeId nodeId(JCTree tree){
+        return new NodeId(++currentNodeId);
     }
 }
