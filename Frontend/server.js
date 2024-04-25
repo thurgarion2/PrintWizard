@@ -23,7 +23,7 @@ const index = function (req, res) {
 
 const eventTrace = function (req, res) {
 
-    fs.readFile('./eventTrace.csv')
+    fs.readFile('./eventTrace.json')
         .then(contents => {
             res.setHeader("Content-Type", "text/csv");
             res.writeHead(200);

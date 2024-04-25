@@ -1,5 +1,5 @@
 export {
-    fromCsv,
+    fromJson,
     RootEventTree,
     POSITION,
     TRACEINDEX,
@@ -253,11 +253,9 @@ function iterForScopedState<STATE,CONTEXT>(trace : [TRACEINDEX, STATE,CONTEXT][]
  ********* util functions
  **************/
 
-const fromCsv = function (csv: string): RootEventTree {
-    const events = csv
-        .split('\n')
-        .filter(label => label.length > 0)
-        .map(label => label.split(', '));
+function fromJson(trace: any): RootEventTree {
+    const events : any[][]  = trace["trace"];
+
     const root = fromTrace(events, 0)[0];
     return {
         type: 'RootEventTree',
@@ -266,7 +264,7 @@ const fromCsv = function (csv: string): RootEventTree {
     } ;
 }
 
-const fromTrace = function (trace: string[][], startIndex: number): [EVENTTREE, number] {
+const fromTrace = function (trace: any[][], startIndex: number): [EVENTTREE, number] {
     const startLabel = trace[startIndex]
     const eventId = labelEventId(startLabel)
 

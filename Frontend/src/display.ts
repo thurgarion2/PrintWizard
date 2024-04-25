@@ -6,10 +6,34 @@ import {
     TraceIterator,
     TRACEINDEX
 } from './eventTree'
-import { ASSIGN, EVENT, EventKinds, nodeIdRepr } from './event';
+import {
+    ASSIGN,
+    EVENT,
+    EventKinds,
+    nodeIdRepr,
+    Value,
+    Identifier,
+    Object
+} from './event';
 export {
-    scopedTrace
+    traceElement,
+    vbox,
+    objectElement,
+    hbox
 };
+
+/**************
+ ********* CONSTANTS
+ **************/
+
+const Result_Style = 'result';
+const Update_Style = 'updates';
+const Click_Style = 'clickable';
+const HBox_Sytle = '';
+const VBox_Sytle = '';
+const Item_Sytle = '';
+const EmojiStart = 0x1F0C;
+const EmojiEnd = 0x1F9FF;
 
 
 /**************
@@ -17,23 +41,108 @@ export {
  **************/
 
 interface UIElement {
-    //should only append as one of its children
-    display: (element: HTMLElement) => void
+    display: (painter: Painter) => void
 }
 
-interface UITrace extends UIElement {
-
+interface Painter {
+    paint: (node: Node) => void
 }
 
-interface UIEventElement extends UIElement {
-
+interface DisplayObject {
+    addObject: (obj: Object) => void
 }
 
 /**************
- ********* UI for trace
+ ********* UI elements
  **************/
 
-function scopedTrace(tree: RootEventTree, element: HTMLElement): UITrace {
+/********
+ **** Vbox
+ ********/
+
+interface VBox extends UIElement {
+    update: () => void
+}
+
+function vbox(items: () => UIElement[]): VBox {
+    const box = divEl([], VBox_Sytle);
+    const painter: Painter = {
+        paint(node) {
+            box.appendChild(node)
+        }
+    }
+    items().map(item => item.display(painter));
+
+    return {
+        display(painter) {
+            painter.paint(box)
+        },
+        update() {
+            box.innerHTML = '';
+            items()
+                .map(item => item.display(painter))
+        }
+    }
+
+}
+
+/********
+ **** Hbox
+ ********/
+
+ interface HBox extends UIElement {
+
+ }
+
+function hbox(items: () => UIElement[]): HBox {
+    const cols = columns([]) 
+    const table = tableEl([cols], HBox_Sytle);
+
+    const painter: Painter = {
+        paint(node) {
+            cols.appendChild(cellElement(node))
+        }
+    }
+
+
+    items().map(item => item.display(painter));
+
+    return {
+        display(painter) {
+            painter.paint(table)
+        }
+    }
+
+}
+
+/********
+ **** Item
+ ********/
+
+
+interface Item extends UIElement {
+
+}
+
+function makeItem(content: Node[]): Item {
+    const node = divEl(content, Item_Sytle);
+    return {
+        display(painter) {
+            painter.paint(node);
+        }
+    }
+}
+
+/**************
+ ********* Component UI
+ **************/
+
+
+/********
+ **** Trace UI
+ ********/
+
+function traceElement(tree: RootEventTree, model: DisplayObject): UIElement {
     const scopedStateTree = scopedStateFromEventTree<ASSIGNSTATE, IDENTCONTEXT>(
         tree,
         zero(),
@@ -44,57 +153,65 @@ function scopedTrace(tree: RootEventTree, element: HTMLElement): UITrace {
     const traceView = traceViewFromScopedState(scopedStateTree);
     const windowSize = 40;
     let startWindow = traceView.start;
+    const [idx, [assign, ident]] = startWindow.element
+    if (!isDisplayed(idx, assign, ident)) {
+        const next = nextDisplayEvent(startWindow)
+        startWindow = next !== undefined ? next : startWindow;
+    }
 
-
-
-    const display = () => {
-        element.innerHTML = '';
-
+    const items = function () {
+        let items = [];
         let it: TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> | undefined = startWindow;
-        let count = 0;
-
-        while (count < windowSize && it !== undefined) {
-            const [eventIndex, [state, ctx]] = it.element;
-            switch (eventIndex.pos) {
-                case POSITION.START:
-                    break;
-                default:
-                    count += 1;
-                    eventElement(ctx.ident, nodeIdRepr(eventIndex.event.nodeId))
-                        .display(element);
-            }
-            it = it.successor()
+        for (let count = 0; count < windowSize && it != undefined; ++count) {
+            items.push(it.element)
+            it = nextDisplayEvent(it)
         }
 
+        return items.map(item => {
+            const [index, [state, ctx]] = item;
+            const event = index.event;
+            const nodes = astElement(
+                ctx.ident,
+                nodeIdRepr(event.nodeId),
+                state.assigns,
+                undefined,
+                model
+            );
+            return makeItem(nodes);
+        });
     }
-   
+
+    const box = vbox(items);
+
     document.addEventListener("keypress", (event: KeyboardEvent) => {
         const keyName = event.key;
         switch (keyName) {
             case 's':
                 const next = nextDisplayEvent(startWindow);
                 startWindow = next === undefined ? startWindow : next;
+                box.update()
                 break;
             case 'w':
                 const prev = prevDisplayEvent(startWindow);
                 startWindow = prev === undefined ? startWindow : prev;
+                box.update()
                 break;
         }
-        display()
 
     });
 
-
-    return {
-        display: display
-    };
+    return box;
 }
 
-function prevDisplayEvent(iter : TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>):TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>|undefined{
-    let it : undefined | TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>  = iter.predecessor();
-    while(it!==undefined){
+/********
+ **** helpers to dispaly the trace
+ ********/
+
+function prevDisplayEvent(iter: TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>): TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> | undefined {
+    let it: undefined | TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> = iter.predecessor();
+    while (it !== undefined) {
         const [idx, [assign, ident]] = it.element
-        if(isDisplayed(idx, assign, ident)){
+        if (isDisplayed(idx, assign, ident)) {
             return it;
         }
         it = it.predecessor();
@@ -102,12 +219,12 @@ function prevDisplayEvent(iter : TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>):Tra
     return it;
 }
 
-function nextDisplayEvent(iter : TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>):TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>|undefined{
-    
-    let it : undefined | TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>  = iter.successor();
-    while(it!==undefined){
+function nextDisplayEvent(iter: TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>): TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> | undefined {
+
+    let it: undefined | TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> = iter.successor();
+    while (it !== undefined) {
         const [idx, [assign, ident]] = it.element
-        if(isDisplayed(idx, assign, ident)){
+        if (isDisplayed(idx, assign, ident)) {
             return it;
         }
         it = it.successor();
@@ -115,14 +232,18 @@ function nextDisplayEvent(iter : TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>):Tra
     return it;
 }
 
-function isDisplayed(idx : TRACEINDEX, assign : ASSIGNSTATE, ident : IDENTCONTEXT):boolean{
+function isDisplayed(idx: TRACEINDEX, assign: ASSIGNSTATE, ident: IDENTCONTEXT): boolean {
+    const event = idx.event
     switch (idx.pos) {
         case POSITION.START:
             return false;
+        case POSITION.END:
+            return event.kind != EventKinds.Flow;
         default:
-           return true;
+            return false;
     }
 }
+
 
 /********
  **** utils
@@ -150,38 +271,150 @@ function updateContext(event: EVENT, ctx: IDENTCONTEXT): IDENTCONTEXT {
 }
 
 function updateState(event: EVENT, states: ASSIGNSTATE[]): ASSIGNSTATE {
-    return {
-        assigns: states
-            .map(s => s.assigns)
-            .reduce((acc: ASSIGN[], val: ASSIGN[]) => acc.concat(val), [])
+    switch (event.kind) {
+        case EventKinds.Update:
+            return { assigns: [{ varName: event.varName, value: event.value }] }
+        default:
+            return {
+                assigns: states
+                    .map(s => s.assigns)
+                    .reduce((acc: ASSIGN[], val: ASSIGN[]) => acc.concat(val), [])
+            }
     }
+}
+
+/********
+ **** Object UI
+ ********/
+
+ function objectElement(obj: Object): UIElement {
+    let nodes: Node[] = [...line([
+        textEl(emojiUnicode(obj.id)),
+        textEl(':'),
+        textEl(shortClassName(obj.class))])]
+    
+    const model : any = undefined
+
+    obj.fields
+        .map(field => {
+            const identifier = displayIdentifier(field.identifier, model)
+            const value = displayValue(field.value, model)
+            nodes.push(...line([
+                textEl(identationRepr(1)),
+                ...identifier,
+                textEl(" = "),
+                value
+            ]))
+        })
+    return makeItem(nodes);
+}
+
+/********
+ **** utils
+ ********/
+
+function shortClassName(name : string):string{
+    const parts = name.split(".");
+    return parts[parts.length-1];
+    
 }
 
 /**************
  ********* UI for Event
  **************/
 
+function astElement(
+    identation: number,
+    text: string,
+    assings: ASSIGN[] | undefined,
+    result: Value | undefined,
+    model: DisplayObject): Node[] {
 
-function eventElement(identation: number, text: string): UIEventElement {
-    return {
-        display: (htmlElement: HTMLElement) => {
-            const element = textEl(identationRepr(identation) + text);
-            htmlElement.appendChild(element);
-            htmlElement.appendChild(brEl());
-        }
-    };
+    let event: Node[] = [textEl(identationRepr(identation) + text)]
+    if (result !== undefined) {
+        event.push(spanEl([textEl(" -> "), displayValue(result, model)], Result_Style));
+    }
+
+    if (assings !== undefined) {
+        event.push(...[
+            textEl(" "),
+            spanEl(displayAssigns(assings, model), Update_Style)
+        ])
+    }
+
+    return event;
 }
+
+/********
+ **** utils
+ ********/
+
+function displayAssigns(assigns: ASSIGN[], model : DisplayObject): Node[] {
+    return assigns
+        .map(assign => displayAssign(assign,model))
+        .reduce((acc, assign) => {
+            if (acc.length > 0) {
+                acc.push(textEl(", "));
+            }
+            acc.push(...assign);
+            return acc;
+        }, [])
+}
+
+function displayAssign(assigns: ASSIGN, model : DisplayObject): Node[] {
+    return [...displayIdentifier(assigns.varName, model), 
+        textEl('='), 
+        displayValue(assigns.value, model)]
+}
+
+/**************
+ ********* UI for Identifier
+ **************/
+
+
+function displayIdentifier(ident: Identifier, model: DisplayObject): Node[] {
+    switch (ident.type) {
+        case 'LocalIdentifier':
+            return [textEl(ident.name)];
+        case 'Field':
+            return [displayValue(ident.obj, model), textEl("." + ident.name)];
+        case 'FiledInObject':
+            return [textEl(ident.name)];
+    }
+
+}
+
+/**************
+ ********* UI for Value
+ **************/
+
+function displayValue(value: Value, model: DisplayObject): Node {
+    switch (value.type) {
+        case 'Literal':
+            return textEl(value.value.toString());
+        case 'Object':
+            return clickAction(
+                [textEl(emojiUnicode(value.id))],
+                () => { model.addObject(value) }
+            );
+        case 'ObjectWithoutFields':
+            return textEl(emojiUnicode(value.id));
+    }
+}
+
+
 
 
 /********
  **** formatting utils for view elements
  ********/
 
-// const joinAssigns = function (assigns) {
-//     return assigns
-//         .map(assign => varName(assign) + '=' + value(assign))
-//         .join(', ');
-// }
+function emojiUnicode(n: number): string {
+    const nbEmojis = EmojiEnd - EmojiStart + 1;
+    const codePoint = (n % nbEmojis) + EmojiStart;
+    return String.fromCodePoint(codePoint);
+}
+
 
 let storeIdent: Map<number, string> = new Map<number, string>([
     [0, ""]
@@ -201,13 +434,17 @@ function identationRepr(ident: number): string {
  ********* UI utils
  **************/
 
-function clickAction(elements: HTMLElement[], action: () => void): HTMLElement {
-    let span = spanEl(elements, undefined);
+function line(elements: Node[]): Node[] {
+    return [...elements, brEl()]
+}
+
+function clickAction(elements: Node[], action: () => void): HTMLElement {
+    let span = spanEl(elements, Click_Style);
     span.addEventListener('click', action)
     return span;
 }
 
-function spanEl(elements: HTMLElement[] | Text[], css: string | undefined): HTMLElement {
+function spanEl(elements: Node[], css: string | undefined): HTMLElement {
     let span = document.createElement("span");
     elements.map(child => span.appendChild(child));
 
@@ -217,13 +454,49 @@ function spanEl(elements: HTMLElement[] | Text[], css: string | undefined): HTML
     return span;
 }
 
+function divEl(elements: Node[], css: string | undefined): HTMLElement {
+    let span = document.createElement("div");
+    elements.map(child => span.appendChild(child));
 
-function styleText(prefix: string, text: string, cssClass: string): HTMLElement {
-    return spanEl([textEl(prefix + text)], cssClass);
+    if (css !== undefined) {
+        span.className = css;
+    }
+    return span;
 }
+
+function tableEl(rows: HTMLTableRowElement[], css: string | undefined): HTMLElement {
+    let table = document.createElement("table");
+    rows.map(row => table.appendChild(row));
+
+    setCssClass(table, css);
+    return table;
+}
+
+function columns(cols : Node[]):HTMLTableRowElement{
+    const row = document.createElement("tr");
+    cols
+        .map(col => {
+            const cell = cellElement(col);
+            row.appendChild(cell);
+        })
+    return row;
+}
+
+function cellElement(node : Node):HTMLTableCellElement{    
+    const cell = document.createElement("td");
+    cell.appendChild(node);
+    return cell;
+}
+
 
 function brEl(): HTMLElement {
     return document.createElement("br");
+}
+
+function setCssClass(node : HTMLElement, css: string | undefined){
+    if (css !== undefined) {
+        node.className = css;
+    }
 }
 
 

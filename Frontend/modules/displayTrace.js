@@ -1,10 +1,10 @@
-import {fromCsv } from './eventTree'
-import {scopedTrace} from './display'
+import { fromJson } from './eventTree'
+import {traceElement, hbox, vbox, objectElement} from './display'
 
 const fetchEventTrace = function () {
     return fetch('eventTrace')
         .then(response => {
-            return response.text()
+            return response.json()
         })
 }
 
@@ -15,7 +15,7 @@ const fetchSourceFormat = function () {
         })
 }
 
-let traceElement = document.getElementById('trace');
+let injectNode = document.getElementById('trace');
 let treeViewer = undefined;
 
 
@@ -24,9 +24,25 @@ Promise.all([fetchEventTrace(), fetchSourceFormat()])
         let rawTrace = results[0]
         let format = results[1]
 
-        const traceTree = fromCsv(rawTrace);
-        const scopedTraceElement = scopedTrace(traceTree, traceElement);
-        scopedTraceElement.display();
+
+        const traceTree = fromJson(rawTrace);
+    
+        const painter = {
+            paint : (node) => injectNode.appendChild(node)
+        };
+
+        let objects = [];
+        const exploreObject = vbox(() => {
+            return objects.map(objectElement);
+        })
+
+        const traceNode = traceElement(traceTree, {addObject : (obj) => {
+            objects.unshift(obj);
+            exploreObject.update();
+        }});
+
+        const app = hbox(() => {return [traceNode, exploreObject]})
+        app.display(painter);
 
     })
     .catch(error => {
