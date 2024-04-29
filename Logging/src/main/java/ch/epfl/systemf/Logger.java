@@ -5,26 +5,76 @@ package ch.epfl.systemf;
 //for now we assume that all the parent relationship can be express with the start parent scope
 //and with the end parent scope. All event in the scope are children of the parent
 
-public interface Logger {
-    public sealed interface Event {}
+public interface Logger{
 
-    // we could use an option, but code gen will be simpler with boolean
-    public record Evaluation(boolean hasResult,
-                             Object result,
-                             boolean hasAssign,
+    /*******************************************************
+     **************** CONSTANTS ******************
+     *******************************************************/
 
-                             String varName,
-                             Object value) implements Event{};
+    /**************
+     ********* Event Types
+     **************/
 
+    enum EventTypes {
+        FLOW_ENTER("flowEnter"),
+        FLOW_EXIT("flowExit"),
+        STATEMENT_ENTER("statEnter"),
+        STATEMENT_EXIT("statEXit"),
+        EXPRESSION_ENTER("exprEnter"),
+        EXPRESSION_EXIT("exprExit"),
+        UPDATE("update");
 
-    public  static int exitEvaluation(int nodeId, Evaluation eval){
-        throw new UnsupportedOperationException();
+        public final String name;
+
+        EventTypes(String name) {
+            this.name = name;
+        }
     }
-    public static  int enter(int nodeId){
-        throw new UnsupportedOperationException();
-    }
-    public  static int exitLogical(int nodeId, String description){
-        throw new UnsupportedOperationException();
-    }
+	/*******************************************************
+	**************** API methods ******************
+	*******************************************************/
 
+	/**************
+	********* Flow methods
+	**************/
+
+	public static int enterFlow(int nodeId){
+		throw new UnsupportedOperationException();
+	}
+
+	public static int exitFlow(int nodeId){
+		throw new UnsupportedOperationException();
+	}
+
+	/**************
+	********* Statement methods
+	**************/
+
+	public static int enterStatement(int nodeId){
+		throw new UnsupportedOperationException();
+	}
+
+	public static int exitStatement(int nodeId){
+		throw new UnsupportedOperationException();
+	}
+
+	/**************
+	********* Expression methods
+	**************/
+
+	public static int enterExpression(int nodeId){
+		throw new UnsupportedOperationException();
+	}
+
+	public static int exitExpression(int nodeId, Object result){
+		throw new UnsupportedOperationException();
+	}
+
+	/**************
+	********* Update methods
+	**************/
+
+	public static int update(int nodeId, String varName, Object value){
+		throw new UnsupportedOperationException();
+	}
 }

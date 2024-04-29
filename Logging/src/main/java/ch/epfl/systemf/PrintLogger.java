@@ -5,8 +5,11 @@ import java.util.Arrays;
 import java.util.Stack;
 import java.util.stream.Collectors;
 
-public class PrintLogger implements Logger{
-    private static record Context(int nodeId, long eventId){};
+public class PrintLogger implements Logger {
+    private static record Context(int nodeId, long eventId) {
+    }
+
+    ;
     private static final Stack<Context> parent = new Stack<>();
 
     private static long eventCounter = 0;
@@ -17,10 +20,11 @@ public class PrintLogger implements Logger{
 
     private final static BufferedWriter print;
 
+    /*******************************************************
+     **************** INITIALIZATION ******************
+     *******************************************************/
+
     static {
-        parent.push(new Context(-1, nextId()));
-
-
         try {
             out = new FileOutputStream(fileName);
         } catch (FileNotFoundException e) {
@@ -31,13 +35,13 @@ public class PrintLogger implements Logger{
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
-                if(print!=null){
+                if (print != null) {
                     print.close();
                 }
-                if(writer!=null){
+                if (writer != null) {
                     writer.close();
                 }
-                if(out!=null){
+                if (out != null) {
                     out.close();
                 }
             } catch (IOException e) {
@@ -46,67 +50,77 @@ public class PrintLogger implements Logger{
         }));
     }
 
+    /*******************************************************
+     **************** API methods ******************
+     *******************************************************/
 
-    public static  int enterEval(int nodeId){
-        long eventId = nextId();
-        print(Long.toString(eventId), Long.toString(parent()), Integer.toString(nodeId), "enterEval");
-        parent.push(new Context(nodeId, eventId));
+
+    /**************
+     ********* Flow methods
+     **************/
+
+    public static int enterFlow(int nodeId) {
+        long eventId = enterScope(nodeId);
+        print(eventId, nodeId, Logger.EventTypes.FLOW_ENTER.name);
         return 0;
     }
 
-    public static  int enterLogical(int nodeId){
-        long eventId = nextId();
-        print(Long.toString(eventId), Long.toString(parent()), Integer.toString(nodeId), "enterLogical");
-        parent.push(new Context(nodeId, eventId));
-        return 0;
-    }
-    public  static int exitEvaluation(int nodeId, Evaluation eval){
+    public static int exitFlow(int nodeId) {
         long eventId = exitScope(nodeId);
-
-
-        print(Long.toString(eventId),
-                Long.toString(parent()),
-                Integer.toString(nodeId),
-                "eval",
-                Boolean.toString(eval.hasResult()),
-                safeToString(eval.result()),
-                Boolean.toString(eval.hasAssign()),
-                safeToString(eval.varName()),
-                safeToString(eval.value()));
+        print(eventId, nodeId, Logger.EventTypes.FLOW_EXIT.name);
         return 0;
     }
 
-    private static String safeToString(Object o){
-        if(o==null)
-            return "null";
-        return o.toString();
+    /**************
+     ********* Statement methods
+     **************/
+
+    public static int enterStatement(int nodeId) {
+        long eventId = enterScope(nodeId);
+        print(eventId, nodeId, Logger.EventTypes.STATEMENT_ENTER.name);
+        return 0;
     }
 
-
-    public static int exitLogical(int nodeId, String description) {
+    public static int exitStatement(int nodeId) {
         long eventId = exitScope(nodeId);
-
-        print(Long.toString(eventId),
-                Long.toString(parent()),
-                Integer.toString(nodeId),
-                "syntax",
-                description);
+        print(eventId, nodeId, Logger.EventTypes.STATEMENT_EXIT.name);
         return 0;
     }
 
-    private static long parent(){
-        return parent.peek().eventId;
+    /**************
+     ********* Expression methods
+     **************/
+
+    public static int enterExpression(int nodeId) {
+        long eventId = enterScope(nodeId);
+        print(eventId, nodeId, Logger.EventTypes.EXPRESSION_ENTER.name);
+        return 0;
     }
 
-    private static long exitScope(int nodeId){
-        Context scope = parent.pop();
-        if(scope.nodeId!= nodeId)
-            throw new IllegalStateException("Invalid exit event "+nodeId+" parent "+scope.nodeId);
-        return scope.eventId;
+    public static int exitExpression(int nodeId, Object result) {
+        long eventId = exitScope(nodeId);
+        //result should use  toValue function
+        print(eventId, nodeId, Logger.EventTypes.EXPRESSION_EXIT.name, result);
+        return 0;
     }
 
-    private static void print(String ... args){
-        String joined = String.join(", ", args);
+    /**************
+     ********* Update methods
+     **************/
+
+    public static int update(int nodeId, String varName, Object value) {
+        long eventId = nextId();
+        // value should use toValue function
+        print(eventId, nodeId, Logger.EventTypes.UPDATE.name, varName, value);
+        return 0;
+    }
+
+    /*******************************************************
+     **************** Log methods ******************
+     *******************************************************/
+
+    private static void print(Object... args) {
+        String joined = Arrays.stream(args).map(PrintLogger::safeToString).collect(Collectors.joining(", "));
 
         try {
             print.write(joined);
@@ -116,7 +130,32 @@ public class PrintLogger implements Logger{
         }
     }
 
-    private static long nextId(){
+    private static String safeToString(Object obj) {
+        return obj==null ? "null" : obj.toString();
+    }
+
+    /*******************************************************
+     **************** Context API ******************
+     *******************************************************/
+
+    private static long parent() {
+        return parent.peek().eventId;
+    }
+
+    private static long enterScope(int nodeId) {
+        long eventId = nextId();
+        parent.push(new Context(nodeId, eventId));
+        return eventId;
+    }
+
+    private static long exitScope(int nodeId) {
+        Context scope = parent.pop();
+        if (scope.nodeId != nodeId)
+            throw new IllegalStateException("Invalid exit event " + nodeId + " parent " + scope.nodeId);
+        return scope.eventId;
+    }
+
+    private static long nextId() {
         return eventCounter++;
     }
 }

@@ -42,7 +42,7 @@ public class TreeInstrumenter extends TreeTranslator {
         createNodeData.dataCall(id, tree);
 
         super.visitApply(tree);
-        this.result = traceLogger.logCall(
+        this.result = traceLogger.logCallExpr(
                 id,
                 (JCTree.JCMethodInvocation) this.result,
                 currentMethod);
@@ -51,21 +51,33 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitExec(JCTree.JCExpressionStatement tree){
         JCTree.JCExpression expr = tree.getExpression();
-        if(expr instanceof JCTree.JCMethodInvocation call){
+        NodeId id = nodeId(tree);
 
-            if(call.type.equals(helper.voidP)){
+        switch(expr){
+            case JCTree.JCMethodInvocation call:
                 super.visitApply(call);
-                this.result = traceLogger.logExec(nodeId(tree), helper.mkTree.Exec((JCTree.JCExpression) this.result), currentMethod);
-            }else{
-                super.visitExec(tree);
-            }
-
-            return;
+                this.result = traceLogger.logCallStatement(
+                    id,
+                    (JCTree.JCMethodInvocation) this.result,
+                    currentMethod);
+                break;
+            case JCTree.JCUnary unary:
+                super.visitUnary(unary);
+                this.result = traceLogger.logUnaryStatement(
+                        id,
+                        (JCTree.JCUnary) this.result,
+                        currentMethod);
+                break;
+            case JCTree.JCAssign assign:
+                super.visitAssign(assign);
+                this.result = traceLogger.logAssignStatement(
+                        id,
+                        (JCTree.JCAssign) this.result,
+                        currentMethod);
+                break;
+            default:
+                throw new IllegalStateException("Unexpected value: " + expr);
         }
-        super.visitExec(tree);
-        if(expr instanceof JCTree.JCUnary)
-            return;
-        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -302,7 +314,7 @@ public class TreeInstrumenter extends TreeTranslator {
         createNodeData.dataUnary(id, tree);
 
         super.visitUnary(tree);
-        this.result = traceLogger.logUnary(
+        this.result = traceLogger.logUnaryExpr(
                 id,
                 (JCTree.JCUnary) this.result,
                 currentMethod);
