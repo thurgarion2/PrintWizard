@@ -9,20 +9,19 @@ import java.util.Map;
 
 public class TreeInstrumenter extends TreeTranslator {
     private final TraceLogger traceLogger;
-    private final NodeData createNodeData;
     private final TreeHelper helper;
     private Symbol.MethodSymbol currentMethod = null;
-    private int currentNodeId = 1;
 
-    private Map<Symbol.MethodSymbol, NodeId> methodId;
 
-    public TreeInstrumenter(TraceLogger traceLogger, NodeData createNodeData, TreeHelper helper){
+    public TreeInstrumenter(TraceLogger traceLogger, TreeHelper helper){
         super();
         this.traceLogger = traceLogger;
         this.helper = helper;
-        this.methodId = new HashMap<>();
-        this.createNodeData = createNodeData;
     }
+
+    /*******************************************************
+     **************** visit node ******************
+     *******************************************************/
 
     @Override
     public void visitAnnotatedType(JCTree.JCAnnotatedType tree) {
@@ -38,45 +37,19 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitApply(JCTree.JCMethodInvocation tree) {
-        NodeId id = nodeId(tree);
-        createNodeData.dataCall(id, tree);
-
         super.visitApply(tree);
         this.result = traceLogger.logCallExpr(
-                id,
                 (JCTree.JCMethodInvocation) this.result,
                 currentMethod);
     }
 
     @Override
     public void visitExec(JCTree.JCExpressionStatement tree){
-        JCTree.JCExpression expr = tree.getExpression();
-        NodeId id = nodeId(tree);
-
-        switch(expr){
-            case JCTree.JCMethodInvocation call:
-                super.visitApply(call);
-                this.result = traceLogger.logCallStatement(
-                    id,
-                    (JCTree.JCMethodInvocation) this.result,
-                    currentMethod);
-                break;
-            case JCTree.JCUnary unary:
-                super.visitUnary(unary);
-                this.result = traceLogger.logUnaryStatement(
-                        id,
-                        (JCTree.JCUnary) this.result,
-                        currentMethod);
-                break;
-            case JCTree.JCAssign assign:
-                super.visitAssign(assign);
-                this.result = traceLogger.logAssignStatement(
-                        id,
-                        (JCTree.JCAssign) this.result,
-                        currentMethod);
-                break;
-            default:
-                throw new IllegalStateException("Unexpected value: " + expr);
+        if(tree.expr instanceof JCTree.JCMethodInvocation call && call.type.equals(helper.voidP)){
+            result = traceLogger.logVoidCallStatement(call, currentMethod);
+        }else{
+            tree.expr = visitStatement(tree.expr);
+            result = tree;
         }
     }
 
@@ -147,39 +120,33 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitForLoop(JCTree.JCForLoop tree) {
-        NodeId forLoop = nodeId(tree);
-        NodeId init = nodeId(null);
-        NodeId iter = nodeId(tree.body);
-        NodeId cond = nodeId(tree.cond);
+        tree.init = translate(tree.init);
+        tree.cond = visitStatement(tree.cond);
+        tree.step = translate(tree.step);
+        tree.body = translate(tree.body);
 
-        createNodeData.dataForLoop(forLoop, init, iter, cond, tree);
-
-        super.visitForLoop(tree);
         this.result = traceLogger.logForLoop(
-                forLoop,
-                init,
-                iter,
-                cond,
-                (JCTree.JCForLoop) this.result,
+                tree,
                 currentMethod);
     }
 
     @Override
     public void visitIf(JCTree.JCIf tree) {
-        NodeId iF = nodeId(tree);
-        NodeId cond = nodeId(tree.cond);
-        NodeId theN = nodeId(tree.thenpart);
-        NodeId elsE = nodeId(tree.elsepart);
-        createNodeData.dataIf(iF, cond, theN, elsE, tree);
+        tree.cond = visitStatement(tree.cond);
+        tree.thenpart = translate(tree.thenpart);
 
-        super.visitIf(tree);
-        this.result = traceLogger.logIf(
-                iF,
-                cond,
-                theN,
-                elsE,
-                (JCTree.JCIf) this.result,
-                currentMethod);
+        if(tree.elsepart instanceof JCTree.JCIf treeIf){
+            visitIf(treeIf);
+
+            this.result = traceLogger.logIfElse(
+                    tree,
+                    currentMethod);
+        }else{
+            tree.elsepart = translate(tree.elsepart);
+            this.result = traceLogger.logIf(
+                    tree,
+                    currentMethod);
+        }
     }
 
     @Override
@@ -203,11 +170,8 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitMethodDef(JCTree.JCMethodDecl tree) {
         this.currentMethod = tree.sym;
-        NodeId method = nodeId(tree);
-        methodId.put(tree.sym, method);
         super.visitMethodDef(tree);
         this.result = traceLogger.logMethod(
-                method,
                 (JCTree.JCMethodDecl) this.result,
                 currentMethod);
     }
@@ -231,15 +195,10 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitReturn(JCTree.JCReturn tree) {
-        NodeId returN = nodeId(tree);
-        createNodeData.dataReturn(returN, tree);
-
-        super.visitReturn(tree);
+        tree.expr = visitStatement(tree.expr);
 
         this.result = traceLogger.logReturn(
-                returN,
-                methodId.get(currentMethod),
-                (JCTree.JCReturn) this.result, currentMethod);
+                tree, currentMethod);
     }
 
     @Override
@@ -310,12 +269,8 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitUnary(JCTree.JCUnary tree) {
-        NodeId id = nodeId(tree);
-        createNodeData.dataUnary(id, tree);
-
         super.visitUnary(tree);
         this.result = traceLogger.logUnaryExpr(
-                id,
                 (JCTree.JCUnary) this.result,
                 currentMethod);
 
@@ -323,33 +278,65 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitVarDef(JCTree.JCVariableDecl tree) {
-        NodeId id = nodeId(tree);
-        if(tree.init!=null)
-            createNodeData.dataVarDecl(id, tree);
-
         super.visitVarDef(tree);
         //we are in a method parameter
         if(tree.init==null)
             return;
-        this.result = traceLogger.logVarDecl(id,(JCTree.JCVariableDecl) this.result, currentMethod);
+        this.result = traceLogger.logVarDecl((JCTree.JCVariableDecl) this.result, currentMethod);
     }
 
     @Override
     public void visitWhileLoop(JCTree.JCWhileLoop tree) {
-        NodeId whileLoop = nodeId(tree);
-        NodeId iter = nodeId(tree.body);
-        NodeId cond = nodeId(tree.cond);
-        createNodeData.dataWhileLoop(whileLoop, iter, cond, tree);
+        tree.cond = visitStatement(tree.cond);
+        assertBlock(tree.body);
+        tree.body = translate(tree.body);
 
-        super.visitWhileLoop(tree);
         this.result = traceLogger.logWhileLoop(
-                whileLoop,
-                iter,
-                cond,
-                (JCTree.JCWhileLoop) this.result, currentMethod);
+                tree, currentMethod);
     }
 
-    private NodeId nodeId(JCTree tree){
-        return new NodeId(++currentNodeId);
+    private static void assertBlock(JCTree.JCStatement statement){
+        if(!(statement instanceof JCTree.JCBlock))
+            throw new IllegalArgumentException("we expect only block for this node");
+    }
+
+    /*******************************************************
+     **************** visit Expression ******************
+     *******************************************************/
+
+    private JCTree.JCExpression visitStatement(JCTree.JCExpression statement){
+        return switch (statement) {
+            case JCTree.JCMethodInvocation call -> {
+                super.visitApply(call);
+                yield traceLogger.logCallStatement(
+                        (JCTree.JCMethodInvocation) this.result,
+                        currentMethod);
+            }
+            case JCTree.JCUnary unary -> {
+                super.visitUnary(unary);
+                yield traceLogger.logUnaryStatement(
+                        (JCTree.JCUnary) this.result,
+                        currentMethod);
+            }
+            case JCTree.JCAssign assign -> {
+                super.visitAssign(assign);
+                yield traceLogger.logAssignStatement(
+                        (JCTree.JCAssign) this.result,
+                        currentMethod);
+            }
+            case JCTree.JCBinary op-> {
+                super.visitBinary(op);
+                yield traceLogger.logStatement(
+                        (JCTree.JCExpression) this.result,
+                        currentMethod);
+            }
+            case JCTree.JCParens parens -> {
+                super.visitParens(parens);
+                yield traceLogger.logStatement(
+                        (JCTree.JCExpression) this.result,
+                        currentMethod);
+            }
+            default -> throw new IllegalStateException("Unexpected value: " + statement);
+        };
     }
 }

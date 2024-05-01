@@ -1,1 +1,1 @@
-java -cp ./:./Logging/target/classes Exemple
+java -cp ./:./Logging/target/classes:./InstrumentationPlugin/target/classes Exemple

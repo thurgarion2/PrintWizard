@@ -38,11 +38,11 @@ public interface Logger{
 	********* Flow methods
 	**************/
 
-	public static int enterFlow(int nodeId){
+	public static int enterFlow(String nodeId){
 		throw new UnsupportedOperationException();
 	}
 
-	public static int exitFlow(int nodeId){
+	public static int exitFlow(String nodeId){
 		throw new UnsupportedOperationException();
 	}
 
@@ -50,11 +50,11 @@ public interface Logger{
 	********* Statement methods
 	**************/
 
-	public static int enterStatement(int nodeId){
+	public static int enterStatement(String nodeId){
 		throw new UnsupportedOperationException();
 	}
 
-	public static int exitStatement(int nodeId){
+	public static int exitStatement(String nodeId){
 		throw new UnsupportedOperationException();
 	}
 
@@ -62,11 +62,11 @@ public interface Logger{
 	********* Expression methods
 	**************/
 
-	public static int enterExpression(int nodeId){
+	public static int enterExpression(String nodeId){
 		throw new UnsupportedOperationException();
 	}
 
-	public static int exitExpression(int nodeId, Object result){
+	public static int exitExpression(String nodeId, Object result){
 		throw new UnsupportedOperationException();
 	}
 
@@ -74,7 +74,7 @@ public interface Logger{
 	********* Update methods
 	**************/
 
-	public static int update(int nodeId, String varName, Object value){
+	public static int update(String nodeId, String varName, Object value){
 		throw new UnsupportedOperationException();
 	}
 }

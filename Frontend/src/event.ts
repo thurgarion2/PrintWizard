@@ -8,6 +8,7 @@ export {
     UPDATE,
     ASSIGN,
     Value,
+    NodeFormat,
     Identifier,
     EventKinds,
     Field,
@@ -19,11 +20,12 @@ export {
     assign,
     result,
     eventIdRepr,
-    nodeIdRepr,
     parseEvent,
     labelEventId,
     isSingleLabel
 }
+
+import { sourceCodeCache } from "./fetch"
 
 
 /*******************************************************
@@ -46,9 +48,19 @@ type ASSIGN = {
     value: Literal | Object
 }
 
-type NODEID = {
-    type: "NODEID",
-    id: string
+type NODEID = NodeFormat | UnknownFormat
+
+type NodeFormat = {
+    type: "NodeFormat",
+    lineNumber : number,
+    line : string,
+    startCol : number,
+    endCol : number
+}
+
+type UnknownFormat = {
+    type: "UnknownFormat",
+    line: string
 }
 
 type EVENT = STATMENT | FLOW | EXPRESSION | UPDATE
@@ -64,7 +76,8 @@ type STATMENT = {
     type: 'EVENT',
     kind: EventKinds.Statement,
     eventId: EVENTID,
-    nodeId: NODEID
+    nodeId: NODEID,
+    result: Literal | Object | NoResult
 }
 
 type FLOW = {
@@ -79,7 +92,7 @@ type EXPRESSION = {
     kind: EventKinds.Expression,
     eventId: EVENTID,
     nodeId: NODEID,
-    result: string
+    result: Literal | Object
 }
 
 type UPDATE = {
@@ -112,6 +125,10 @@ type LocalIdentifier = {
 }
 
 type Value = Literal | Object | ObjectWithoutFields;
+
+type NoResult = {
+    type : 'NoResult'
+}
 
 type Literal = {
     type: 'Literal',
@@ -162,9 +179,38 @@ const makeEventId = function (id: number): EVENTID {
 
 
 const makeNodeId = function (id: string): NODEID {
+    const result = sourceCodeCache().data()
+
+    switch(result.type){
+        case 'failure':
+            return {
+                type: "UnknownFormat",
+                line: id
+            };
+        case 'success':
+            const format = result.payload
+            if(id in format){
+                const nodeInfo : any = format[id]
+                return {
+                    type: "NodeFormat",
+                    lineNumber : nodeInfo['lineNumber'],
+                    line : nodeInfo['line'],
+                    startCol : nodeInfo['startCol'],
+                    endCol : nodeInfo['endCol']
+                }
+            }else{
+                return {
+                    type: "UnknownFormat",
+                    line: id
+                };
+            }
+    }
+
+}
+
+const makeNoResult = function():NoResult{
     return {
-        type: 'NODEID',
-        id: id
+        type: 'NoResult'
     };
 }
 
@@ -173,7 +219,8 @@ const makeStatment = function (params: PARAMS): STATMENT {
         type: 'EVENT',
         kind: EventKinds.Statement,
         eventId: params.eventId,
-        nodeId: params.nodeId
+        nodeId: params.nodeId,
+        result: makeNoResult()
     };
 }
 
@@ -210,6 +257,10 @@ const makeUpdate = function (params: PARAMS): UPDATE {
         value: value
     };
 }
+
+/********
+ **** value from Json
+ ********/
 
 function valueFromJson(value: any): Value {
     const kind: string = value["type"]
@@ -251,6 +302,10 @@ function valueFromJson(value: any): Value {
     }
 }
 
+/********
+ **** identifier formJson
+ ********/
+
 function identifierFromJson(value: any): Identifier {
     const kind: string = value["type"]
 
@@ -275,6 +330,7 @@ function identifierFromJson(value: any): Identifier {
                 classDef: value["classDef"]
             }
         default:
+            debugger;
             throw new Error(value);
 
     }
@@ -293,13 +349,6 @@ const eventIdRepr = function (id: EVENTID): string {
     return id.id.toString();
 }
 
-/********
- **** NODEID api
- ********/
-
-const nodeIdRepr = function (id: NODEID): string {
-    return id.id;
-}
 
 /********
  **** UPDATE api
@@ -313,13 +362,13 @@ const assign = function (event: UPDATE): ASSIGN {
  **** EXPRESSION api
  ********/
 
-const result = function (event: EXPRESSION): string {
+const result = function (event: EXPRESSION): Object|Literal {
     return event.result;
 }
 
 
 /**************
- ********* parse event from csv representation
+ ********* parse event from array representation
  **************/
 
 /********

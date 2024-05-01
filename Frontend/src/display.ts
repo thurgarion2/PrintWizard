@@ -6,14 +6,16 @@ import {
     TraceIterator,
     TRACEINDEX
 } from './eventTree'
+
 import {
     ASSIGN,
     EVENT,
     EventKinds,
-    nodeIdRepr,
     Value,
     Identifier,
-    Object
+    Object,
+    NODEID,
+    NodeFormat
 } from './event';
 export {
     traceElement,
@@ -29,11 +31,13 @@ export {
 const Result_Style = 'result';
 const Update_Style = 'updates';
 const Click_Style = 'clickable';
+const Ast_Node_Syle = 'astNode';
 const HBox_Sytle = '';
 const VBox_Sytle = '';
 const Item_Sytle = '';
 const EmojiStart = 0x1F0C;
 const EmojiEnd = 0x1F9FF;
+const SPACE = '\u00A0';
 
 
 /**************
@@ -90,12 +94,12 @@ function vbox(items: () => UIElement[]): VBox {
  **** Hbox
  ********/
 
- interface HBox extends UIElement {
+interface HBox extends UIElement {
 
- }
+}
 
 function hbox(items: () => UIElement[]): HBox {
-    const cols = columns([]) 
+    const cols = columns([])
     const table = tableEl([cols], HBox_Sytle);
 
     const painter: Painter = {
@@ -170,9 +174,9 @@ function traceElement(tree: RootEventTree, model: DisplayObject): UIElement {
         return items.map(item => {
             const [index, [state, ctx]] = item;
             const event = index.event;
-            const nodes = astElement(
+            const nodes = astNodeElement(
                 ctx.ident,
-                nodeIdRepr(event.nodeId),
+                event.nodeId,
                 state.assigns,
                 undefined,
                 model
@@ -287,13 +291,13 @@ function updateState(event: EVENT, states: ASSIGNSTATE[]): ASSIGNSTATE {
  **** Object UI
  ********/
 
- function objectElement(obj: Object): UIElement {
+function objectElement(obj: Object): UIElement {
     let nodes: Node[] = [...line([
         textEl(emojiUnicode(obj.id)),
         textEl(':'),
         textEl(shortClassName(obj.class))])]
-    
-    const model : any = undefined
+
+    const model: any = undefined
 
     obj.fields
         .map(field => {
@@ -313,45 +317,95 @@ function updateState(event: EVENT, states: ASSIGNSTATE[]): ASSIGNSTATE {
  **** utils
  ********/
 
-function shortClassName(name : string):string{
+function shortClassName(name: string): string {
     const parts = name.split(".");
-    return parts[parts.length-1];
-    
+    return parts[parts.length - 1];
+
 }
 
 /**************
  ********* UI for Event
  **************/
 
-function astElement(
+function astNodeElement(
     identation: number,
-    text: string,
+    node: NODEID,
     assings: ASSIGN[] | undefined,
     result: Value | undefined,
     model: DisplayObject): Node[] {
 
-    let event: Node[] = [textEl(identationRepr(identation) + text)]
+    let event: Node[]
+
+    switch (node.type) {
+        case 'UnknownFormat':
+            return [textEl('unknown ' + node.line)]
+
+        case 'NodeFormat':
+            return elementForKnownNodeFormat(
+                identation,
+                node,
+                assings,
+                result,
+                model)
+
+    }
+}
+
+function elementForKnownNodeFormat(
+    identation: number,
+    node: NodeFormat,
+    assings: ASSIGN[] | undefined,
+    result: Value | undefined,
+    model: DisplayObject): Node[] {
+
+    let res: Node[] = []
     if (result !== undefined) {
-        event.push(spanEl([textEl(" -> "), displayValue(result, model)], Result_Style));
+        res.push(spanEl([textEl(" -> "), displayValue(result, model)], Result_Style));
     }
 
+    let assigns_: Node[] = []
     if (assings !== undefined) {
-        event.push(...[
+        assigns_.push(...[
             textEl(" "),
             spanEl(displayAssigns(assings, model), Update_Style)
         ])
     }
 
-    return event;
+    return [
+        formatLineNumber(node.lineNumber),
+        textEl(identationRepr(identation)),
+        ... formatLine(node, assigns_, res)
+    ]
 }
 
 /********
  **** utils
  ********/
 
-function displayAssigns(assigns: ASSIGN[], model : DisplayObject): Node[] {
+function formatLineNumber(lineNumber: number): Node {
+    const constSize = 4;
+    const repr = lineNumber.toString();
+    console.assert(repr.length <= 4);
+    return textEl(SPACE.repeat(constSize - repr.length) + repr);
+}
+
+function formatLine(node: NodeFormat, assings: Node[], result: Node[]): Node[] {
+    const line = node.line;
+    const before = line.slice(0,node.startCol);
+    const astFocused = line.slice(node.startCol,node.endCol)
+    const after = line.slice(node.endCol)
+    return [
+        textEl(before),
+        spanEl([textEl(astFocused)], Ast_Node_Syle),
+        ... result,
+        ... assings,
+        textEl(after)
+    ];
+}
+
+function displayAssigns(assigns: ASSIGN[], model: DisplayObject): Node[] {
     return assigns
-        .map(assign => displayAssign(assign,model))
+        .map(assign => displayAssign(assign, model))
         .reduce((acc, assign) => {
             if (acc.length > 0) {
                 acc.push(textEl(", "));
@@ -361,10 +415,10 @@ function displayAssigns(assigns: ASSIGN[], model : DisplayObject): Node[] {
         }, [])
 }
 
-function displayAssign(assigns: ASSIGN, model : DisplayObject): Node[] {
-    return [...displayIdentifier(assigns.varName, model), 
-        textEl('='), 
-        displayValue(assigns.value, model)]
+function displayAssign(assigns: ASSIGN, model: DisplayObject): Node[] {
+    return [...displayIdentifier(assigns.varName, model),
+    textEl('='),
+    displayValue(assigns.value, model)]
 }
 
 /**************
@@ -424,7 +478,7 @@ function identationRepr(ident: number): string {
     console.assert(ident >= 0)
 
     if (!storeIdent.has(ident)) {
-        storeIdent.set(ident, '\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0' + identationRepr(ident - 1));
+        storeIdent.set(ident, SPACE.repeat(6) + identationRepr(ident - 1));
     }
     const res = storeIdent.get(ident);
     return res === undefined ? '' : res;
@@ -472,7 +526,7 @@ function tableEl(rows: HTMLTableRowElement[], css: string | undefined): HTMLElem
     return table;
 }
 
-function columns(cols : Node[]):HTMLTableRowElement{
+function columns(cols: Node[]): HTMLTableRowElement {
     const row = document.createElement("tr");
     cols
         .map(col => {
@@ -482,7 +536,7 @@ function columns(cols : Node[]):HTMLTableRowElement{
     return row;
 }
 
-function cellElement(node : Node):HTMLTableCellElement{    
+function cellElement(node: Node): HTMLTableCellElement {
     const cell = document.createElement("td");
     cell.appendChild(node);
     return cell;
@@ -493,7 +547,7 @@ function brEl(): HTMLElement {
     return document.createElement("br");
 }
 
-function setCssClass(node : HTMLElement, css: string | undefined){
+function setCssClass(node: HTMLElement, css: string | undefined) {
     if (css !== undefined) {
         node.className = css;
     }

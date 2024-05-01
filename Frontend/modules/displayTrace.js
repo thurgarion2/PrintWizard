@@ -1,28 +1,15 @@
 import { fromJson } from './eventTree'
+import { initCache, traceCache } from './fetch'
 import {traceElement, hbox, vbox, objectElement} from './display'
 
-const fetchEventTrace = function () {
-    return fetch('eventTrace')
-        .then(response => {
-            return response.json()
-        })
-}
-
-const fetchSourceFormat = function () {
-    return fetch('sourceFormat')
-        .then(response => {
-            return response.json()
-        })
-}
 
 let injectNode = document.getElementById('trace');
 let treeViewer = undefined;
 
 
-Promise.all([fetchEventTrace(), fetchSourceFormat()])
+Promise.all([initCache()])
     .then(results => {
-        let rawTrace = results[0]
-        let format = results[1]
+        let rawTrace = traceCache().data().payload
 
 
         const traceTree = fromJson(rawTrace);

@@ -9,15 +9,17 @@ import com.sun.tools.javac.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-public class PrintTraceLogger implements TraceLogger {
+public class JsonFileLogger implements TraceLogger {
     private final TreeHelper helper;
     private final Logger callLogger;
     private final TreeMaker mkTree;
+    private final NodeIdFactory makeNodeId;
 
 
-    public PrintTraceLogger(TreeHelper instr) {
+    public JsonFileLogger(TreeHelper instr, NodeIdFactory makeNodeId) {
         this.helper = instr;
         this.mkTree = instr.mkTree;
+        this.makeNodeId = makeNodeId;
 
         TreeHelper.SimpleClass printLogger = new TreeHelper.SimpleClass("ch.epfl.systemf", "PrintLogger");
         callLogger = new Logger(printLogger, helper);
@@ -33,41 +35,48 @@ public class PrintTraceLogger implements TraceLogger {
      **************/
 
     @Override
-    public JCTree.JCStatement logForLoop(NodeId forLoop, NodeId init, NodeId iter, NodeId cond, JCTree.JCForLoop loop, Symbol.MethodSymbol currMethod) {
-        loop.body = enterExitFlow(loop.body, iter);
-        loop.cond = enterExitStatement(loop.cond, helper.boolP, cond, currMethod);
-        return enterExitFlow(loop, forLoop);
+    public JCTree.JCStatement logForLoop(JCTree.JCForLoop loop, Symbol.MethodSymbol currMethod) {
+        NodeIdFactory.NodeId loopId = makeNodeId.mutipleLineNode;
+
+        loop.body = enterFlow(loop.body, loopId);
+        loop.step = loop.step.append(mkTree.Exec(callLogger.exitFlow(loopId.identifier())));
+        return enterExitFlow(loop, makeNodeId.mutipleLineNode);
     }
 
     @Override
-    public JCTree.JCStatement logWhileLoop(NodeId whileLoop, NodeId iter, NodeId cond, JCTree.JCWhileLoop loop, Symbol.MethodSymbol currMethod) {
-        loop.body = enterExitFlow(loop.body, iter);
-        loop.cond = enterExitStatement(loop.cond, helper.boolP, cond, currMethod);
-        return enterExitFlow(loop, whileLoop);
+    public JCTree.JCStatement logWhileLoop(JCTree.JCWhileLoop loop, Symbol.MethodSymbol currMethod) {
+        loop.body = enterExitFlow(loop.body, makeNodeId.mutipleLineNode);
+        return enterExitFlow(loop, makeNodeId.mutipleLineNode);
     }
 
     @Override
-    public JCTree.JCStatement logIf(NodeId iF, NodeId cond, NodeId theN, NodeId elsE, JCTree.JCIf branch, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCStatement logIf(JCTree.JCIf branch, Symbol.MethodSymbol currMethod) {
         JCTree.JCStatement then = branch.thenpart;
         JCTree.JCStatement elsePart = branch.elsepart;
         if (then != null) {
-            branch.thenpart = enterExitFlow(then, theN);
+            branch.thenpart = enterExitFlow(then, makeNodeId.mutipleLineNode);
         }
         if (elsePart != null) {
-            branch.elsepart = enterExitFlow(elsePart, elsE);
+            branch.elsepart = enterExitFlow(elsePart, makeNodeId.mutipleLineNode);
         }
-
-        branch.cond = enterExitStatement(branch.cond, helper.boolP, cond, currMethod);
-
-        return enterExitFlow(branch, iF);
+        return enterExitFlow(branch, makeNodeId.mutipleLineNode);
     }
 
     @Override
-    public JCTree.JCMethodDecl logMethod(NodeId nodeId, JCTree.JCMethodDecl method, Symbol.MethodSymbol currMethod) {
-        String methodName = method.name.toString();
+    public JCTree.JCStatement logIfElse(JCTree.JCIf branch, Symbol.MethodSymbol currMethod) {
+        JCTree.JCStatement then = branch.thenpart;
+        if (then != null) {
+            branch.thenpart = enterExitFlow(then, makeNodeId.mutipleLineNode);
+        }
+
+        return branch;
+    }
+
+    @Override
+    public JCTree.JCMethodDecl logMethod(JCTree.JCMethodDecl method, Symbol.MethodSymbol currMethod) {
         JCTree.JCBlock body = method.getBody();
 
-        body.stats = enterExitFlow(body.getStatements(), nodeId);
+        body.stats = enterExitFlow(body.getStatements(), makeNodeId.mutipleLineNode);
         return method;
     }
 
@@ -77,29 +86,24 @@ public class PrintTraceLogger implements TraceLogger {
      **************/
 
     @Override
-    public JCTree.JCStatement logReturn(NodeId nodeId, NodeId method, JCTree.JCReturn ret, Symbol.MethodSymbol currMethod) {
-
-        ret.expr = enterExitStatement(ret.expr,
-                currMethod.getReturnType(),
-                nodeId,
-                currMethod);
+    public JCTree.JCStatement logReturn(JCTree.JCReturn ret, Symbol.MethodSymbol currMethod) {
 
         ret.expr = exitFlow(ret.expr,
                 currMethod.getReturnType(),
-                method,
+                makeNodeId.mutipleLineNode,
                 currMethod);
         return ret;
     }
 
     @Override
-    public JCTree.JCStatement logVarDecl(NodeId nodeId, JCTree.JCVariableDecl varDecl, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCStatement logVarDecl(JCTree.JCVariableDecl varDecl, Symbol.MethodSymbol currMethod) {
         if (varDecl.init == null)
             throw new IllegalArgumentException();
 
         varDecl.init = logUpdate(
                 varDecl.init,
                 varDecl.type,
-                nodeId,
+                makeNodeId.nodeId(varDecl),
                 varDecl.name.toString(),
                 currMethod
         );
@@ -107,33 +111,50 @@ public class PrintTraceLogger implements TraceLogger {
         varDecl.init = enterExitStatement(
                 varDecl.init,
                 varDecl.type,
-                nodeId,
+                makeNodeId.nodeId(varDecl),
                 currMethod);
         return varDecl;
     }
 
     @Override
-    public JCTree.JCStatement logCallStatement(NodeId nodeId, JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
-        if(call.type.equals(helper.voidP)){
+    public JCTree.JCExpression logCallStatement(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
+        if(call.type.equals(helper.voidP))
+            throw new IllegalArgumentException();
+        return enterExitStatement(call, call.type, makeNodeId.nodeId(call), currMethod);
+    }
 
-            return enterExitStatement(mkTree.Exec(call), nodeId);
-        }else{
-            return enterExitStatementStatRet(call, call.type, nodeId, currMethod);
-        }
+    @Override
+    public JCTree.JCStatement logVoidCallStatement(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
+        if(!call.type.equals(helper.voidP))
+            throw new IllegalArgumentException();
+
+        NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
+
+        return applyBeforeAfter(mkTree.Exec(call),
+                () -> callLogger.enterStatement(id.identifier()),
+                () -> callLogger.exitStatement(id.identifier())
+        );
     }
 
     //we can factorize a lot of methods in statements and expression as most do the same thing, but with different labels
     @Override
-    public JCTree.JCExpressionStatement logUnaryStatement(NodeId nodeId, JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCExpression logUnaryStatement(JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
         String name = unary.getExpression().toString();
-        JCTree.JCExpression withUpdate = logUpdate(unary, unary.type, nodeId, name, currMethod);
 
-        return enterExitStatementStatRet(withUpdate, unary.type, nodeId, currMethod);
+        NodeIdFactory.NodeId id = makeNodeId.nodeId(unary);
+
+        JCTree.JCExpression withUpdate = logUpdate(unary, unary.type, id, name, currMethod);
+        return enterExitStatement(withUpdate, unary.type, id, currMethod);
     }
 
     @Override
-    public JCTree.JCExpressionStatement logAssignStatement(NodeId id, JCTree.JCAssign result, Symbol.MethodSymbol currentMethod) {
+    public JCTree.JCExpression logAssignStatement(JCTree.JCAssign result, Symbol.MethodSymbol currentMethod) {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public JCTree.JCExpression logStatement(JCTree.JCExpression statement, Symbol.MethodSymbol currentMethod) {
+        return enterExitStatement(statement, statement.type, makeNodeId.nodeId(statement), currentMethod);
     }
 
 
@@ -143,20 +164,22 @@ public class PrintTraceLogger implements TraceLogger {
 
 
     @Override
-    public JCTree.JCExpression logCallExpr(NodeId nodeId, JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCExpression logCallExpr(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
         if (call.type.equals(helper.voidP))
             throw new IllegalArgumentException("cannot assign void to variable");
-        return enterExitExpression(call, call.type, nodeId, currMethod);
+        return enterExitExpression(call, call.type, makeNodeId.nodeId(call), currMethod);
     }
 
     @Override
-    public JCTree.JCExpression logUnaryExpr(NodeId nodeId, JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
+    public JCTree.JCExpression logUnaryExpr(JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
         String name = unary.getExpression().toString();
-        JCTree.JCExpression withUpdate = logUpdate(unary, unary.type, nodeId, name, currMethod);
+
+        NodeIdFactory.NodeId id = makeNodeId.nodeId(unary);
+        JCTree.JCExpression withUpdate = logUpdate(unary, unary.type, id, name, currMethod);
 
         return enterExitExpression(withUpdate,
                 unary.type,
-                nodeId,
+                id,
                 currMethod);
     }
 
@@ -169,53 +192,42 @@ public class PrintTraceLogger implements TraceLogger {
      ********* Inject Flow
      **************/
 
-    private List<JCTree.JCStatement> enterExitFlow(List<JCTree.JCStatement> stats, NodeId id) {
+    private List<JCTree.JCStatement> enterExitFlow(List<JCTree.JCStatement> stats, NodeIdFactory.NodeId id) {
         return applyBeforeAfter(stats,
-                () -> callLogger.enterFlow(id.nodeId()),
-                () -> callLogger.exitFlow(id.nodeId()));
+                () -> callLogger.enterFlow(id.identifier()),
+                () -> callLogger.exitFlow(id.identifier()));
     }
 
-    private JCTree.JCStatement enterExitFlow(JCTree.JCStatement stat, NodeId id) {
+    private JCTree.JCStatement enterExitFlow(JCTree.JCStatement stat, NodeIdFactory.NodeId id) {
         return applyBeforeAfter(stat,
-                () -> callLogger.enterFlow(id.nodeId()),
-                () -> callLogger.exitFlow(id.nodeId()));
+                () -> callLogger.enterFlow(id.identifier()),
+                () -> callLogger.exitFlow(id.identifier()));
+    }
+
+    private JCTree.JCStatement enterFlow(JCTree.JCStatement stat, NodeIdFactory.NodeId id) {
+        return applyBefore(stat,
+                () -> callLogger.enterFlow(id.identifier()));
     }
 
 
-    private JCTree.JCExpression exitFlow(JCTree.JCExpression expr, Type exprType, NodeId id, Symbol.MethodSymbol method) {
-        return applyAfter(expr, exprType, symbol -> callLogger.exitFlow(id.nodeId()), method);
+    private JCTree.JCExpression exitFlow(JCTree.JCExpression expr, Type exprType, NodeIdFactory.NodeId id, Symbol.MethodSymbol method) {
+        return applyAfter(expr, exprType, symbol -> callLogger.exitFlow(id.identifier()), method);
     }
 
     /**************
      ********* Inject Statement label
      **************/
 
-    private JCTree.JCExpressionStatement enterExitStatementStatRet(JCTree.JCExpression expr,
-                                                   Type exprType,
-                                                   NodeId id,
-                                                   Symbol.MethodSymbol method) {
-
-        return mkTree.Exec(enterExitStatement(expr, exprType, id, method));
-    }
-
-    private JCTree.JCStatement enterExitStatement(JCTree.JCExpressionStatement stat,
-                                                   NodeId id) {
-
-        return applyBeforeAfter(stat,
-                () -> callLogger.enterStatement(id.nodeId()),
-                () -> callLogger.exitStatement(id.nodeId())
-                );
-    }
 
     private JCTree.JCExpression enterExitStatement(JCTree.JCExpression expr,
                                                     Type exprType,
-                                                    NodeId id,
+                                                    NodeIdFactory.NodeId id,
                                                     Symbol.MethodSymbol method) {
 
         return applyBeforeAfter(expr,
                 exprType,
-                () -> callLogger.enterStatement(id.nodeId()),
-                symbol -> callLogger.exitStatement(id.nodeId()),
+                () -> callLogger.enterStatement(id.identifier()),
+                symbol -> callLogger.exitStatement(id.identifier()),
                 method);
     }
 
@@ -227,12 +239,12 @@ public class PrintTraceLogger implements TraceLogger {
 
     private JCTree.JCExpression enterExitExpression(JCTree.JCExpression expr,
                                                     Type exprType,
-                                                    NodeId id,
+                                                    NodeIdFactory.NodeId id,
                                                     Symbol.MethodSymbol method) {
         return applyBeforeAfter(expr,
                 exprType,
-                () -> callLogger.enterExpression(id.nodeId()),
-                symbol -> callLogger.exitExpression(id.nodeId(), symbol),
+                () -> callLogger.enterExpression(id.identifier()),
+                symbol -> callLogger.exitExpression(id.identifier(), symbol),
                 method);
     }
 
@@ -242,12 +254,12 @@ public class PrintTraceLogger implements TraceLogger {
 
     private JCTree.JCExpression logUpdate(JCTree.JCExpression expr,
                                           Type exprType,
-                                          NodeId id,
+                                          NodeIdFactory.NodeId id,
                                           String name,
                                           Symbol.MethodSymbol method) {
         return applyAfter(expr,
                 exprType,
-                symbol -> callLogger.update(id.nodeId(), name, symbol),
+                symbol -> callLogger.update(id.identifier(), name, symbol),
                 method);
     }
 
@@ -258,6 +270,23 @@ public class PrintTraceLogger implements TraceLogger {
     /********
      **** Inject before/after JCTree.Statement
      ********/
+
+    private JCTree.JCStatement applyBefore(JCTree.JCStatement stat,
+                                                Supplier<JCTree.JCExpression> before) {
+
+        return switch (stat){
+            case JCTree.JCBlock block -> {
+                block.stats = block.stats.prepend(mkTree.Exec(before.get()));
+                yield block;
+            }
+            default -> {
+                yield mkTree.Block(0, List.of(
+                        mkTree.Exec(before.get()),
+                        stat
+                ));
+            }
+        };
+    }
 
     private JCTree.JCStatement applyBeforeAfter(JCTree.JCStatement stat,
                                                 Supplier<JCTree.JCExpression> before,

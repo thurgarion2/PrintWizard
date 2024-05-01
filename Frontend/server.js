@@ -23,7 +23,7 @@ const index = function (req, res) {
 
 const eventTrace = function (req, res) {
 
-    fs.readFile('./eventTrace.json')
+    fs.readFile('./../eventTrace.json')
         .then(contents => {
             res.setHeader("Content-Type", "text/csv");
             res.writeHead(200);
@@ -89,10 +89,13 @@ const requestListener = function (req, res) {
             break;
         case "/display":
             exposeModule(req, res, './build/display.js');
-            break;    
+            break;
+        case "/fetch":
+            exposeModule(req, res, './build/fetch.js');
+            break;
         default:
             console.log(req.url);
-            console.assert(false);    
+            console.assert(false);
     }
 }
 
