@@ -6,8 +6,11 @@ import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.List;
 
+import java.util.Collections;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 public class JsonFileLogger implements TraceLogger {
     private final TreeHelper helper;
@@ -22,7 +25,7 @@ public class JsonFileLogger implements TraceLogger {
         this.makeNodeId = makeNodeId;
 
         TreeHelper.SimpleClass printLogger = new TreeHelper.SimpleClass("ch.epfl.systemf", "PrintLogger");
-        callLogger = new Logger(printLogger, helper);
+        callLogger = new Logger(helper);
 
     }
 
@@ -39,7 +42,7 @@ public class JsonFileLogger implements TraceLogger {
         NodeIdFactory.NodeId loopId = makeNodeId.mutipleLineNode;
 
         loop.body = enterFlow(loop.body, loopId);
-        loop.step = loop.step.append(mkTree.Exec(callLogger.exitFlow(loopId.identifier())));
+        loop.step = loop.step.append(mkTree.Exec(callLogger.simpleFlow.exit(loopId.identifier())));
         return enterExitFlow(loop, makeNodeId.mutipleLineNode);
     }
 
@@ -118,21 +121,21 @@ public class JsonFileLogger implements TraceLogger {
 
     @Override
     public JCTree.JCExpression logCallStatement(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
-        if(call.type.equals(helper.voidP))
+        if (call.type.equals(helper.voidP))
             throw new IllegalArgumentException();
         return enterExitStatement(call, call.type, makeNodeId.nodeId(call), currMethod);
     }
 
     @Override
     public JCTree.JCStatement logVoidCallStatement(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
-        if(!call.type.equals(helper.voidP))
+        if (!call.type.equals(helper.voidP))
             throw new IllegalArgumentException();
 
         NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
 
         return applyBeforeAfter(mkTree.Exec(call),
-                () -> callLogger.enterStatement(id.identifier()),
-                () -> callLogger.exitStatement(id.identifier())
+                () -> callLogger.voidStatement.enter(id.identifier()),
+                () -> callLogger.voidStatement.exit(id.identifier())
         );
     }
 
@@ -194,24 +197,24 @@ public class JsonFileLogger implements TraceLogger {
 
     private List<JCTree.JCStatement> enterExitFlow(List<JCTree.JCStatement> stats, NodeIdFactory.NodeId id) {
         return applyBeforeAfter(stats,
-                () -> callLogger.enterFlow(id.identifier()),
-                () -> callLogger.exitFlow(id.identifier()));
+                () -> callLogger.simpleFlow.enter(id.identifier()),
+                () -> callLogger.simpleFlow.exit(id.identifier()));
     }
 
     private JCTree.JCStatement enterExitFlow(JCTree.JCStatement stat, NodeIdFactory.NodeId id) {
         return applyBeforeAfter(stat,
-                () -> callLogger.enterFlow(id.identifier()),
-                () -> callLogger.exitFlow(id.identifier()));
+                () -> callLogger.simpleFlow.enter(id.identifier()),
+                () -> callLogger.simpleFlow.exit(id.identifier()));
     }
 
     private JCTree.JCStatement enterFlow(JCTree.JCStatement stat, NodeIdFactory.NodeId id) {
         return applyBefore(stat,
-                () -> callLogger.enterFlow(id.identifier()));
+                () -> callLogger.simpleFlow.enter(id.identifier()));
     }
 
 
     private JCTree.JCExpression exitFlow(JCTree.JCExpression expr, Type exprType, NodeIdFactory.NodeId id, Symbol.MethodSymbol method) {
-        return applyAfter(expr, exprType, symbol -> callLogger.exitFlow(id.identifier()), method);
+        return applyAfter(expr, exprType, symbol -> callLogger.simpleFlow.enter(id.identifier()), method);
     }
 
     /**************
@@ -220,17 +223,16 @@ public class JsonFileLogger implements TraceLogger {
 
 
     private JCTree.JCExpression enterExitStatement(JCTree.JCExpression expr,
-                                                    Type exprType,
-                                                    NodeIdFactory.NodeId id,
-                                                    Symbol.MethodSymbol method) {
+                                                   Type exprType,
+                                                   NodeIdFactory.NodeId id,
+                                                   Symbol.MethodSymbol method) {
 
         return applyBeforeAfter(expr,
                 exprType,
-                () -> callLogger.enterStatement(id.identifier()),
-                symbol -> callLogger.exitStatement(id.identifier()),
+                () -> callLogger.voidStatement.enter(id.identifier()),
+                symbol -> callLogger.voidStatement.exit(id.identifier()),
                 method);
     }
-
 
 
     /**************
@@ -241,11 +243,14 @@ public class JsonFileLogger implements TraceLogger {
                                                     Type exprType,
                                                     NodeIdFactory.NodeId id,
                                                     Symbol.MethodSymbol method) {
-        return applyBeforeAfter(expr,
-                exprType,
-                () -> callLogger.enterExpression(id.identifier()),
-                symbol -> callLogger.exitExpression(id.identifier(), symbol),
-                method);
+        return null;
+//        callLogger.
+//
+//        return applyBeforeAfter(expr,
+//                exprType,
+//                () -> callLogger.enterExpression(id.identifier()),
+//                symbol -> callLogger.exitExpression(id.identifier(), symbol),
+//                method);
     }
 
     /**************
@@ -257,9 +262,10 @@ public class JsonFileLogger implements TraceLogger {
                                           NodeIdFactory.NodeId id,
                                           String name,
                                           Symbol.MethodSymbol method) {
+
         return applyAfter(expr,
                 exprType,
-                symbol -> callLogger.update(id.identifier(), name, symbol),
+                symbol -> callLogger.update.write(id.identifier(), name, symbol),
                 method);
     }
 
@@ -272,9 +278,9 @@ public class JsonFileLogger implements TraceLogger {
      ********/
 
     private JCTree.JCStatement applyBefore(JCTree.JCStatement stat,
-                                                Supplier<JCTree.JCExpression> before) {
+                                           Supplier<JCTree.JCExpression> before) {
 
-        return switch (stat){
+        return switch (stat) {
             case JCTree.JCBlock block -> {
                 block.stats = block.stats.prepend(mkTree.Exec(before.get()));
                 yield block;
@@ -292,7 +298,7 @@ public class JsonFileLogger implements TraceLogger {
                                                 Supplier<JCTree.JCExpression> before,
                                                 Supplier<JCTree.JCExpression> after) {
 
-        return switch (stat){
+        return switch (stat) {
             case JCTree.JCBlock block -> {
                 block.stats = applyBeforeAfter(block.stats, before, after);
                 yield block;
@@ -312,8 +318,8 @@ public class JsonFileLogger implements TraceLogger {
      ********/
 
     private List<JCTree.JCStatement> applyBeforeAfter(List<JCTree.JCStatement> stats,
-                                                Supplier<JCTree.JCExpression> before,
-                                                Supplier<JCTree.JCExpression> after) {
+                                                      Supplier<JCTree.JCExpression> before,
+                                                      Supplier<JCTree.JCExpression> after) {
 
         return stats.prepend(mkTree.Exec(before.get())).append(mkTree.Exec(after.get()));
     }
@@ -326,7 +332,7 @@ public class JsonFileLogger implements TraceLogger {
                                            Type exprType,
                                            Function<Symbol, JCTree.JCExpression> after,
                                            Symbol.MethodSymbol method) {
-        if(exprType.equals(helper.voidP))
+        if (exprType.equals(helper.voidP))
             throw new IllegalArgumentException("void type cannot be bind to variable");
 
         Symbol.VarSymbol exit = new Symbol.VarSymbol(0,
@@ -352,7 +358,7 @@ public class JsonFileLogger implements TraceLogger {
                                                  Supplier<JCTree.JCExpression> before,
                                                  Function<Symbol, JCTree.JCExpression> after,
                                                  Symbol.MethodSymbol method) {
-        if(exprType.equals(helper.voidP))
+        if (exprType.equals(helper.voidP))
             throw new IllegalArgumentException("void type cannot be bind to variable");
 
         Symbol.VarSymbol enter = new Symbol.VarSymbol(0,

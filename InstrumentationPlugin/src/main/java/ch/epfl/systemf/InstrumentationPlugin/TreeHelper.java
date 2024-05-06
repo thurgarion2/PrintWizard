@@ -40,27 +40,6 @@ public class TreeHelper {
     }
 
 
-    public JCTree.JCExpression newEvaluation(boolean hasResult, Symbol result, boolean hasAssign, String varName, Symbol value){
-        if(hasResult && result==null)
-            throw new IllegalStateException();
-        if(hasAssign && (varName==null || value==null))
-            throw new IllegalStateException();
-
-        JCTree.JCExpression nullExpr = mkTree.Literal(TypeTag.BOT,
-                null)
-                .setType(symb.botType);
-
-        return simpleNewClass(this.evaluation,
-                List.of(
-                        mkTree.Literal(hasResult),
-                        hasResult ? mkTree.Ident(result) : nullExpr,
-                        mkTree.Literal(hasAssign),
-                        hasAssign ?  mkTree.Literal(varName) : nullExpr,
-                        hasAssign ? mkTree.Ident(value) : nullExpr
-                ),
-                List.of(boolP, objectP, boolP, string, objectP));
-    }
-
 
     public JCTree.JCExpression simpleNewClass(SimpleClass clazz, List<JCTree.JCExpression> args, List<Type> argsType){
 
@@ -93,9 +72,18 @@ public class TreeHelper {
         return mkTree.Select(mkTree.Ident(symbol(clazz)), symbol);
     }
 
-    public JCTree.JCExpression instanceMethod(SimpleClass clazz, String name, List<Type> argTypes, Type ret) {
-        Symbol.MethodSymbol symbol = instanceMethod(symbol(clazz), name, argTypes, ret);
-        return mkTree.Select(mkTree.Ident(symbol(clazz)), symbol);
+    public JCTree.JCExpression callStaticMethod(TreeHelper.SimpleClass clazz,
+                                                   String name,
+                                                   List<Type> argTypes,
+                                                   Type ret,
+                                                   List<JCTree.JCExpression> args) {
+        JCTree.JCExpression method= staticMethod(clazz,
+                name,
+                argTypes,
+                ret
+        );
+
+        return callFun(method, args);
     }
 
 

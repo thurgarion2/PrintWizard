@@ -10,7 +10,7 @@ export {
     Value,
     NodeFormat,
     Identifier,
-    EventKinds,
+    EventKind as EventKinds,
     Field,
     FieldInObject,
     LocalIdentifier,
@@ -32,16 +32,98 @@ import { sourceCodeCache } from "./fetch"
  **************** EVENTS ******************
  *******************************************************/
 
+type EVENT = FLOW | STATMENT | EXPRESSION | UPDATE | VoidSTATMENT
+
+type STATMENT = {
+    type: 'EVENT',
+    eventType: EventType.Statement,
+    kind: EventKind.Simple,
+    nodeId: NODEID,
+    eventId: EVENTID,
+    data: Result
+}
+
+type VoidSTATMENT = {
+    type: 'EVENT',
+    eventType: EventType.Statement,
+    kind: EventKind.Void,
+    nodeId: NODEID,
+    eventId: EVENTID,
+    data: Empty
+}
+
+type FLOW = {
+    type: 'EVENT',
+    eventType: EventType.Flow,
+    kind: EventKind.Simple,
+    nodeId: NODEID,
+    eventId: EVENTID,
+    data: Empty
+}
+
+type EXPRESSION = {
+    type: 'EVENT',
+    eventType: EventType.Expression,
+    kind: EventKind.Simple,
+    nodeId: NODEID,
+    eventId: EVENTID,
+    data: Result
+}
+
+type UPDATE = {
+    type: 'EVENT',
+    eventType: EventType.Update,
+    kind: EventKind.Simple,
+    nodeId: NODEID,
+    eventId: EVENTID,
+    data: Write
+}
+
 
 /**************
- ********* Types
+ ********* event id
  **************/
-
 
 type EVENTID = {
     type: 'EVENTID',
     id: number
 }
+
+
+/**************
+ ********* event types/kind
+ **************/
+
+
+enum EventKind {
+    Simple,
+    Void
+}
+
+enum EventType {
+    Statement,
+    Flow,
+    Expression,
+    Update
+}
+
+/**************
+ ********* event data
+ **************/
+
+type Empty = {}
+type Result = { value: Literal | Object }
+type Write = {
+    varName: Field | LocalIdentifier,
+    value: Literal | Object
+}
+
+
+
+/*******************************************************
+ **************** Value representation ******************
+ *******************************************************/
+
 
 type ASSIGN = {
     varName: Field | LocalIdentifier,
@@ -52,10 +134,10 @@ type NODEID = NodeFormat | UnknownFormat
 
 type NodeFormat = {
     type: "NodeFormat",
-    lineNumber : number,
-    line : string,
-    startCol : number,
-    endCol : number
+    lineNumber: number,
+    line: string,
+    startCol: number,
+    endCol: number
 }
 
 type UnknownFormat = {
@@ -63,46 +145,6 @@ type UnknownFormat = {
     line: string
 }
 
-type EVENT = STATMENT | FLOW | EXPRESSION | UPDATE
-
-enum EventKinds {
-    Statement,
-    Flow,
-    Expression,
-    Update
-}
-
-type STATMENT = {
-    type: 'EVENT',
-    kind: EventKinds.Statement,
-    eventId: EVENTID,
-    nodeId: NODEID,
-    result: Literal | Object | NoResult
-}
-
-type FLOW = {
-    type: 'EVENT',
-    kind: EventKinds.Flow,
-    eventId: EVENTID,
-    nodeId: NODEID
-}
-
-type EXPRESSION = {
-    type: 'EVENT',
-    kind: EventKinds.Expression,
-    eventId: EVENTID,
-    nodeId: NODEID,
-    result: Literal | Object
-}
-
-type UPDATE = {
-    type: 'EVENT',
-    kind: EventKinds.Update,
-    eventId: EVENTID,
-    nodeId: NODEID,
-    varName: Field | LocalIdentifier,
-    value: Literal | Object
-}
 
 type Identifier = Field | FieldInObject | LocalIdentifier;
 
@@ -127,7 +169,7 @@ type LocalIdentifier = {
 type Value = Literal | Object | ObjectWithoutFields;
 
 type NoResult = {
-    type : 'NoResult'
+    type: 'NoResult'
 }
 
 type Literal = {
@@ -181,7 +223,7 @@ const makeEventId = function (id: number): EVENTID {
 const makeNodeId = function (id: string): NODEID {
     const result = sourceCodeCache().data()
 
-    switch(result.type){
+    switch (result.type) {
         case 'failure':
             return {
                 type: "UnknownFormat",
@@ -189,16 +231,16 @@ const makeNodeId = function (id: string): NODEID {
             };
         case 'success':
             const format = result.payload
-            if(id in format){
-                const nodeInfo : any = format[id]
+            if (id in format) {
+                const nodeInfo: any = format[id]
                 return {
                     type: "NodeFormat",
-                    lineNumber : nodeInfo['lineNumber'],
-                    line : nodeInfo['line'],
-                    startCol : nodeInfo['startCol'],
-                    endCol : nodeInfo['endCol']
+                    lineNumber: nodeInfo['lineNumber'],
+                    line: nodeInfo['line'],
+                    startCol: nodeInfo['startCol'],
+                    endCol: nodeInfo['endCol']
                 }
-            }else{
+            } else {
                 return {
                     type: "UnknownFormat",
                     line: id
@@ -208,7 +250,7 @@ const makeNodeId = function (id: string): NODEID {
 
 }
 
-const makeNoResult = function():NoResult{
+const makeNoResult = function (): NoResult {
     return {
         type: 'NoResult'
     };
@@ -217,7 +259,7 @@ const makeNoResult = function():NoResult{
 const makeStatment = function (params: PARAMS): STATMENT {
     return {
         type: 'EVENT',
-        kind: EventKinds.Statement,
+        kind: EventKind.Statement,
         eventId: params.eventId,
         nodeId: params.nodeId,
         result: makeNoResult()
@@ -228,7 +270,7 @@ const makeStatment = function (params: PARAMS): STATMENT {
 const makeFlow = function (params: PARAMS): FLOW {
     return {
         type: 'EVENT',
-        kind: EventKinds.Flow,
+        kind: EventKind.Flow,
         eventId: params.eventId,
         nodeId: params.nodeId
     };
@@ -238,7 +280,7 @@ const makeFlow = function (params: PARAMS): FLOW {
 const makeExpr = function (params: PARAMS): EXPRESSION {
     return {
         type: 'EVENT',
-        kind: EventKinds.Expression,
+        kind: EventKind.Expression,
         eventId: params.eventId,
         nodeId: params.nodeId,
         result: params.data[0]
@@ -246,11 +288,11 @@ const makeExpr = function (params: PARAMS): EXPRESSION {
 }
 
 const makeUpdate = function (params: PARAMS): UPDATE {
-    const varName : any = identifierFromJson(params.data[0])
-    const value : any = valueFromJson(params.data[1])
+    const varName: any = identifierFromJson(params.data[0])
+    const value: any = valueFromJson(params.data[1])
     return {
         type: 'EVENT',
-        kind: EventKinds.Update,
+        kind: EventKind.Update,
         eventId: params.eventId,
         nodeId: params.nodeId,
         varName: varName,
@@ -289,12 +331,12 @@ function valueFromJson(value: any): Value {
                     };
                 })
             }
-            case "objectWithout":
-                return {
-                    type: "ObjectWithoutFields",
-                    class: value["class"],
-                    id: value["id"]
-                }    
+        case "objectWithout":
+            return {
+                type: "ObjectWithoutFields",
+                class: value["class"],
+                id: value["id"]
+            }
         default:
             console.log(value)
             throw new Error(value);
@@ -316,7 +358,7 @@ function identifierFromJson(value: any): Identifier {
                 name: value["name"]
             };
         case "field":
-            const obj :any = valueFromJson(value["obj"])
+            const obj: any = valueFromJson(value["obj"])
             return {
                 type: 'Field',
                 name: value["name"],
@@ -362,7 +404,7 @@ const assign = function (event: UPDATE): ASSIGN {
  **** EXPRESSION api
  ********/
 
-const result = function (event: EXPRESSION): Object|Literal {
+const result = function (event: EXPRESSION): Object | Literal {
     return event.result;
 }
 
