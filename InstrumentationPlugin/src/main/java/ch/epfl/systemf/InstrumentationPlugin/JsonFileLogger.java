@@ -5,12 +5,12 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.List;
+import com.sun.tools.javac.util.Name;
 
-import java.util.Collections;
-import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 public class JsonFileLogger implements TraceLogger {
     private final TreeHelper helper;
@@ -83,11 +83,6 @@ public class JsonFileLogger implements TraceLogger {
         return method;
     }
 
-
-    /**************
-     ********* Statement
-     **************/
-
     @Override
     public JCTree.JCStatement logReturn(JCTree.JCReturn ret, Symbol.MethodSymbol currMethod) {
 
@@ -97,6 +92,12 @@ public class JsonFileLogger implements TraceLogger {
                 currMethod);
         return ret;
     }
+
+
+    /**************
+     ********* Statement
+     **************/
+
 
     @Override
     public JCTree.JCStatement logVarDecl(JCTree.JCVariableDecl varDecl, Symbol.MethodSymbol currMethod) {
@@ -123,7 +124,23 @@ public class JsonFileLogger implements TraceLogger {
     public JCTree.JCExpression logCallStatement(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
         if (call.type.equals(helper.voidP))
             throw new IllegalArgumentException();
-        return enterExitStatement(call, call.type, makeNodeId.nodeId(call), currMethod);
+
+        List<Symbol.VarSymbol> symbols = argsSymbols(call, currMethod);
+        Symbol.VarSymbol symbol = new Symbol.VarSymbol(0, helper.name("+++"), helper.intP, currMethod);
+
+        NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
+
+        JCTree.JCExpression logArgsAndCall = mkTree.LetExpr(
+                storeArgValues(symbols, call.args).append(mkTree.VarDef(symbol, callLogger.resultCall.call(id.identifier(), symbols))),
+                call
+        ).setType(call.type);
+        call.args = symbols.map(mkTree::Ident);
+
+        return applyBeforeAfter(logArgsAndCall,
+                call.type,
+                () -> callLogger.resultCall.enter(id.identifier()),
+                s -> callLogger.resultCall.exit(id.identifier(), symbol),
+                currMethod);
     }
 
     @Override
@@ -133,9 +150,34 @@ public class JsonFileLogger implements TraceLogger {
 
         NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
 
-        return applyBeforeAfter(mkTree.Exec(call),
-                () -> callLogger.voidStatement.enter(id.identifier()),
-                () -> callLogger.voidStatement.exit(id.identifier())
+
+
+        List<Symbol.VarSymbol> symbols = argsSymbols(call, currMethod);
+        JCTree.JCStatement logArgsAndCall = mkTree.Block(0,
+                storeArgValues(symbols, call.args)
+                        .append(mkTree.Exec(callLogger.voidCall.call(id.identifier(), symbols)))
+                        .append(mkTree.Exec(call))
+        );
+        call.args = symbols.map(mkTree::Ident);
+
+        return applyBeforeAfter(logArgsAndCall,
+                () -> callLogger.voidCall.enter(id.identifier()),
+                () -> callLogger.voidCall.exit(id.identifier())
+        );
+    }
+
+    private List<JCTree.JCStatement> storeArgValues(List<Symbol.VarSymbol> symbols, List<JCTree.JCExpression> args){
+       return List.from(
+               IntStream.range(0, symbols.size())
+                       .mapToObj(i -> mkTree.VarDef(symbols.get(i), args.get(i)))
+                       .toList());
+    }
+
+    private List<Symbol.VarSymbol> argsSymbols(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod){
+        List<Type> argTypes = call.getMethodSelect().type.getParameterTypes();
+        return List.from(IntStream.range(0, argTypes.size())
+                .mapToObj(i -> new Symbol.VarSymbol(0, helper.name("**arg" + i), argTypes.get(i), currMethod))
+                .toList()
         );
     }
 
@@ -214,7 +256,7 @@ public class JsonFileLogger implements TraceLogger {
 
 
     private JCTree.JCExpression exitFlow(JCTree.JCExpression expr, Type exprType, NodeIdFactory.NodeId id, Symbol.MethodSymbol method) {
-        return applyAfter(expr, exprType, symbol -> callLogger.simpleFlow.enter(id.identifier()), method);
+        return applyAfter(expr, exprType, symbol -> callLogger.simpleFlow.exit(id.identifier()), method);
     }
 
     /**************
@@ -229,8 +271,8 @@ public class JsonFileLogger implements TraceLogger {
 
         return applyBeforeAfter(expr,
                 exprType,
-                () -> callLogger.voidStatement.enter(id.identifier()),
-                symbol -> callLogger.voidStatement.exit(id.identifier()),
+                () -> callLogger.simpleStatement.enter(id.identifier()),
+                symbol -> callLogger.simpleStatement.exit(id.identifier(), symbol),
                 method);
     }
 

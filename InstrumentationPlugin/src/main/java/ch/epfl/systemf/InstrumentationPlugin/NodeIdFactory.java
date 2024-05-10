@@ -23,7 +23,7 @@ public class NodeIdFactory {
 
     public record NodeId(int nodeId, int line, String sourceFileName) {
         public String identifier(){
-            return nodeId+"-"+line;
+            return nodeId+"_"+line;
         }
 
     }

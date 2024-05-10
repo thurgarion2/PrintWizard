@@ -16,8 +16,9 @@ public class Logger {
 
     final SimpleFlow simpleFlow = this.new SimpleFlow();
     final SimpleStatement simpleStatement = this.new SimpleStatement();
-    final VoidStatement voidStatement = this.new VoidStatement();
+    final VoidCall voidCall = this.new VoidCall();
     final Update update = this.new Update();
+    final ResultCall resultCall = this.new ResultCall();
 
 
     /**************
@@ -51,15 +52,36 @@ public class Logger {
 
     }
 
-    final class VoidStatement implements Event{
-        private static final TreeHelper.SimpleClass clazz = innerClass("VoidStatement");
+    final class VoidCall implements Event{
+        private static final TreeHelper.SimpleClass clazz = innerClass("VoidCall");
 
         public JCTree.JCExpression enter(String nodeId){
             return callSimpleEnter(clazz, nodeId);
         }
 
+        public JCTree.JCExpression call(String nodeId, List<? extends Symbol> argValues){
+            return callCall(clazz, nodeId, argValues);
+        }
+
         public JCTree.JCExpression exit(String nodeId){
             return callSimpleExit(clazz, nodeId);
+        }
+
+    }
+
+    final class ResultCall implements Event{
+        private static final TreeHelper.SimpleClass clazz = innerClass("ResultCall");
+
+        public JCTree.JCExpression enter(String nodeId){
+            return callSimpleEnter(clazz, nodeId);
+        }
+
+        public JCTree.JCExpression call(String nodeId, List<? extends Symbol> argValues){
+            return callCall(clazz, nodeId, argValues);
+        }
+
+        public JCTree.JCExpression exit(String nodeId, Symbol result){
+            return callExitResult(clazz, nodeId, result);
         }
 
     }
@@ -87,6 +109,16 @@ public class Logger {
         return new TreeHelper.SimpleClass("ch.epfl.systemf", "FileLogger$"+name);
     }
 
+    private JCTree.JCExpression callCall(TreeHelper.SimpleClass clazz, String nodeId, List<? extends Symbol> argValues){
+        JCTree.JCExpression arr = helper.objectArray(argValues);
+        return helper.callStaticMethod(
+                clazz,
+                "call",
+                List.of(helper.string, arr.type),
+                helper.intP,
+                List.of(mkTree.Literal(nodeId), arr));
+    }
+
     private JCTree.JCExpression callSimpleEnter(TreeHelper.SimpleClass clazz, String nodeId){
         return helper.callStaticMethod(
                 clazz,
@@ -100,7 +132,7 @@ public class Logger {
 
         return helper.callStaticMethod(
                 clazz,
-                "enter",
+                "exit",
                 List.of(helper.string, helper.objectP),
                 helper.intP,
                 List.of(mkTree.Literal(nodeId), mkTree.Ident(result)));
@@ -111,7 +143,7 @@ public class Logger {
 
         return helper.callStaticMethod(
                 clazz,
-                "enter",
+                "exit",
                 List.of(helper.string),
                 helper.intP,
                 List.of(mkTree.Literal(nodeId)));

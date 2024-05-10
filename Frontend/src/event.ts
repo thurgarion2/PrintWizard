@@ -6,23 +6,27 @@ export {
     EXPRESSION,
     FLOW,
     UPDATE,
-    ASSIGN,
     Value,
     NodeFormat,
     Identifier,
-    EventKind as EventKinds,
+    EventKind,
     Field,
+    Data,
+    Write,
     FieldInObject,
     LocalIdentifier,
     Literal,
-    Object,
+    ObjectValue,
     ObjectWithoutFields,
-    assign,
-    result,
-    eventIdRepr,
-    parseEvent,
-    labelEventId,
-    isSingleLabel
+    Label,
+    LabelPos,
+    EventType,
+    EventSubKind,
+    Result,
+    resultIsDefined,
+    writeIsDefined,
+    parseRawLabels,
+    parseLabels
 }
 
 import { sourceCodeCache } from "./fetch"
@@ -31,54 +35,82 @@ import { sourceCodeCache } from "./fetch"
 /*******************************************************
  **************** EVENTS ******************
  *******************************************************/
-
-type EVENT = FLOW | STATMENT | EXPRESSION | UPDATE | VoidSTATMENT
-
-type STATMENT = {
+interface EventTemplate {
     type: 'EVENT',
-    eventType: EventType.Statement,
-    kind: EventKind.Simple,
-    nodeId: NODEID,
-    eventId: EVENTID,
+    description: EventDescription
+    data: Data
+}
+
+type EVENT = FLOW | STATMENT | EXPRESSION | UPDATE | VoidCall | ResultCall
+
+interface STATMENT extends EventTemplate {
+    description: {
+        eventId: EVENTID,
+        nodeId: NODEID,
+        type: { kind: EventKind.Statement, subkind: EventSubKind.Simple }
+    }
     data: Result
 }
 
-type VoidSTATMENT = {
+interface VoidCall extends EventTemplate {
     type: 'EVENT',
-    eventType: EventType.Statement,
-    kind: EventKind.Void,
-    nodeId: NODEID,
-    eventId: EVENTID,
+    description: {
+        eventId: EVENTID,
+        nodeId: NODEID,
+        type: { kind: EventKind.Statement, subkind: EventSubKind.VoidCall }
+    }
     data: Empty
 }
 
-type FLOW = {
+interface ResultCall extends EventTemplate {
     type: 'EVENT',
-    eventType: EventType.Flow,
-    kind: EventKind.Simple,
-    nodeId: NODEID,
-    eventId: EVENTID,
-    data: Empty
-}
-
-type EXPRESSION = {
-    type: 'EVENT',
-    eventType: EventType.Expression,
-    kind: EventKind.Simple,
-    nodeId: NODEID,
-    eventId: EVENTID,
+    description: {
+        eventId: EVENTID,
+        nodeId: NODEID,
+        type: { kind: EventKind.Statement, subkind: EventSubKind.ResultCall }
+    }
     data: Result
 }
 
-type UPDATE = {
+interface FLOW extends EventTemplate {
     type: 'EVENT',
-    eventType: EventType.Update,
-    kind: EventKind.Simple,
-    nodeId: NODEID,
-    eventId: EVENTID,
+    description: {
+        eventId: EVENTID,
+        nodeId: NODEID,
+        type: { kind: EventKind.Flow, subkind: EventSubKind.Simple }
+    }
+    data: Empty
+}
+
+interface EXPRESSION extends EventTemplate {
+    type: 'EVENT',
+    description: {
+        eventId: EVENTID,
+        nodeId: NODEID,
+        type: { kind: EventKind.Expression, subkind: EventSubKind.Simple }
+    }
+    data: Result
+}
+
+interface UPDATE extends EventTemplate {
+    type: 'EVENT',
+    description: {
+        eventId: EVENTID,
+        nodeId: NODEID,
+        type: { kind: EventKind.Update, subkind: EventSubKind.Simple }
+    }
     data: Write
 }
 
+/**************
+ ********* event description
+ **************/
+
+type EventDescription = {
+    eventId: EVENTID,
+    nodeId: NODEID,
+    type: EventType
+}
 
 /**************
  ********* event id
@@ -94,41 +126,328 @@ type EVENTID = {
  ********* event types/kind
  **************/
 
+type EventType = { kind: EventKind, subkind: EventSubKind }
 
-enum EventKind {
-    Simple,
-    Void
+enum EventSubKind {
+    Simple = "simple",
+    VoidCall = "callVoid",
+    ResultCall = "resultCall"
 }
 
-enum EventType {
-    Statement,
-    Flow,
-    Expression,
-    Update
+enum EventKind {
+    Statement = "statement",
+    Flow = "flow",
+    Expression = "expression",
+    Update = "update"
 }
 
 /**************
  ********* event data
  **************/
-
-type Empty = {}
-type Result = { value: Literal | Object }
+type Data = Empty | Result | Write
+type Empty = { type: 'empty' }
+type Result = { type: 'result', value: Literal | ObjectValue | undefined }
 type Write = {
-    varName: Field | LocalIdentifier,
-    value: Literal | Object
+    type: 'write',
+    varName: Field | LocalIdentifier | undefined,
+    value: Literal | ObjectValue | undefined
+}
+
+/**************
+ ********* makeEvent
+ **************/
+
+function makeEvent(description: EventDescription): EVENT {
+    switch (keyType(description.type)) {
+        case keyType({ kind: EventKind.Statement, subkind: EventSubKind.Simple }):
+            return {
+                type: 'EVENT',
+                description: {
+                    eventId: description.eventId,
+                    nodeId: description.nodeId,
+                    type: { kind: EventKind.Statement, subkind: EventSubKind.Simple }
+                },
+                data: makeResult()
+            }
+        case keyType({ kind: EventKind.Statement, subkind: EventSubKind.VoidCall }):
+            return {
+                type: 'EVENT',
+                description: {
+                    eventId: description.eventId,
+                    nodeId: description.nodeId,
+                    type: { kind: EventKind.Statement, subkind: EventSubKind.VoidCall }
+                },
+                data: makeEmpty()
+            }
+
+        case keyType({ kind: EventKind.Statement, subkind: EventSubKind.ResultCall }):
+            return {
+                type: 'EVENT',
+                description: {
+                    eventId: description.eventId,
+                    nodeId: description.nodeId,
+                    type: { kind: EventKind.Statement, subkind: EventSubKind.ResultCall }
+                },
+                data: makeResult()
+            }
+        case keyType({ kind: EventKind.Flow, subkind: EventSubKind.Simple }):
+            return {
+                type: 'EVENT',
+                description: {
+                    eventId: description.eventId,
+                    nodeId: description.nodeId,
+                    type: { kind: EventKind.Flow, subkind: EventSubKind.Simple }
+                },
+                data: makeEmpty()
+            }
+        case keyType({ kind: EventKind.Expression, subkind: EventSubKind.Simple }):
+            return {
+                type: 'EVENT',
+                description: {
+                    eventId: description.eventId,
+                    nodeId: description.nodeId,
+                    type: { kind: EventKind.Expression, subkind: EventSubKind.Simple }
+                },
+                data: makeResult()
+            }
+        case keyType({ kind: EventKind.Update, subkind: EventSubKind.Simple }):
+            return {
+                type: 'EVENT',
+                description: {
+                    eventId: description.eventId,
+                    nodeId: description.nodeId,
+                    type: { kind: EventKind.Update, subkind: EventSubKind.Simple }
+                },
+                data: makeWrite()
+            }
+        default:
+            debugger;
+            console.log("unknown event " + description)
+            throw new Error()
+    }
+}
+
+function keyType(type: EventType): any {
+    return `${type.kind}-${type.subkind}`;
+}
+
+/**************
+ ********* data operations
+ **************/
+
+function makeEmpty(): Empty {
+    return { type: 'empty' }
+}
+
+function makeResult(): Result {
+    return { type: 'result', value: undefined }
+}
+
+function resultIsDefined(res: Result): Boolean {
+    return res.value !== undefined
+}
+
+function makeWrite(): Write {
+    return { type: 'write', varName: undefined, value: undefined }
+}
+
+function writeIsDefined(write: Write): Boolean {
+    return write.value !== undefined && write.varName !== undefined
 }
 
 
 
 /*******************************************************
+ **************** Labels ******************
+ *******************************************************/
+
+/**************
+ ********* types
+ **************/
+
+type RawLabel = {
+    pos: LabelPos,
+    eventDescription: {
+        eventId: EVENTID,
+        nodeId: NODEID,
+        type: EventType
+    },
+    data: Map<string, any> | undefined
+}
+
+type Label = {
+    pos: LabelPos,
+    event: EVENT
+}
+
+enum LabelPos {
+    START = "start",
+    UPDATE = "update",
+    END = "end",
+    CALL = "call"
+}
+
+/**************
+ ********* parse label
+ **************/
+
+function parseLabels(rawLabels: RawLabel[]): Label[] {
+    let partialEvents: Map<number, EVENT> = new Map()
+    return rawLabels.map(l => parseLabel(l, partialEvents))
+}
+
+function parseLabel(rawLabel: RawLabel, partialEvents: Map<number, EVENT>): Label {
+    let event: EVENT
+
+    switch (rawLabel.pos) {
+        case LabelPos.UPDATE:
+            event = makeEvent(rawLabel.eventDescription)
+            break;
+        case LabelPos.START:
+            event = makeEvent(rawLabel.eventDescription)
+            partialEvents.set(rawLabel.eventDescription.eventId.id, event);
+            break;
+        case LabelPos.END:
+            event = partialEvents.get(rawLabel.eventDescription.eventId.id) as EVENT
+            partialEvents.delete(rawLabel.eventDescription.eventId.id);
+            break;
+        case LabelPos.CALL:
+            event = partialEvents.get(rawLabel.eventDescription.eventId.id) as EVENT
+    }
+
+    const fields = rawLabel.data === undefined ? [] : rawLabel.data.entries()
+    for (const [name, value] of fields) {
+        ((event.data) as any)[name] = value
+    }
+
+    console.assert(event !== undefined)
+
+    return {
+        pos: rawLabel.pos,
+        event: event
+    }
+
+}
+
+/**************
+ ********* parse raw labels
+ **************/
+
+
+function parseRawLabels(jsonTrace: any): RawLabel[] {
+    return jsonTrace["trace"].map(parseRawLabel)
+}
+
+function parseRawLabel(jsonLabel: any[]): RawLabel {
+    const pos: LabelPos = parseEnum(jsonLabel[0], LabelPos)
+
+    const eventId: EVENTID = {
+        type: 'EVENTID',
+        id: Number(jsonLabel[1])
+    }
+
+    const nodeId: NODEID = makeNodeId(jsonLabel[2])
+    const type: EventType = {
+        kind: parseEnum(jsonLabel[3], EventKind),
+        subkind: parseEnum(jsonLabel[4], EventSubKind)
+    }
+
+
+    let labelSchema = schema([pos, type])
+    labelSchema = labelSchema
+
+    const rawData = jsonLabel.slice(5, jsonLabel.length);
+    let data = undefined
+
+    if (rawData.length > 0) {
+        console.assert(labelSchema.length === rawData.length, `schema for [${pos},${type}] is not correct`)
+        data = new Map<string, any>();
+
+        for (let i = 0; i < rawData.length; ++i) {
+
+            data.set(labelSchema[i].name, labelSchema[i].parse(rawData[i]))
+        }
+    }
+
+    return {
+        pos: pos,
+        eventDescription: {
+            eventId: eventId,
+            nodeId: nodeId,
+            type: type
+        },
+        data: data
+    }
+
+}
+
+/********
+ **** schema
+ ********/
+
+function schema(key: [LabelPos, EventType]): { name: string, parse: (json: any) => any }[] {
+    const sKey = stringKey(key)
+    if (schemaMapping.has(sKey)) {
+        return schemaMapping.get(sKey) as { name: string, parse: (json: any) => any }[]
+    }
+
+    debugger;
+    console.log(`we don't have a schema for ${key}`)
+    throw new Error()
+
+}
+
+function stringKey(key: [LabelPos, EventType]): string {
+    return `${key[0]}-${key[1].kind}-${key[1].subkind}`
+}
+
+
+const schemaFields: [[LabelPos, EventType], { name: string, parse: (json: any) => any }[]][] = [
+    [[LabelPos.START, { kind: EventKind.Statement, subkind: EventSubKind.Simple }], []],
+    [[LabelPos.END, { kind: EventKind.Statement, subkind: EventSubKind.Simple }],
+    [{ name: 'value', parse: valueFromJson }]],
+    [[LabelPos.START, { kind: EventKind.Statement, subkind: EventSubKind.VoidCall }], []],
+    [[LabelPos.CALL, { kind: EventKind.Statement, subkind: EventSubKind.VoidCall }],
+    [{ name: 'args', parse: (arr: any[]) => arr.map(valueFromJson) }]],
+    [[LabelPos.END, { kind: EventKind.Statement, subkind: EventSubKind.VoidCall }], []],
+    [[LabelPos.START, { kind: EventKind.Statement, subkind: EventSubKind.ResultCall }], []],
+    [[LabelPos.CALL, { kind: EventKind.Statement, subkind: EventSubKind.ResultCall }],
+    [{ name: 'args', parse: (arr: any[]) => arr.map(valueFromJson) }]],
+    [[LabelPos.END, { kind: EventKind.Statement, subkind: EventSubKind.ResultCall }],
+    [{ name: 'value', parse: valueFromJson }]],
+    [[LabelPos.START, { kind: EventKind.Flow, subkind: EventSubKind.Simple }], []],
+    [[LabelPos.END, { kind: EventKind.Flow, subkind: EventSubKind.Simple }], []],
+    [[LabelPos.START, { kind: EventKind.Expression, subkind: EventSubKind.Simple }], []],
+    [[LabelPos.END, { kind: EventKind.Expression, subkind: EventSubKind.Simple }],
+    [{ name: 'value', parse: valueFromJson }]],
+    [[LabelPos.UPDATE, { kind: EventKind.Update, subkind: EventSubKind.Simple }], []],
+    [[LabelPos.UPDATE, { kind: EventKind.Update, subkind: EventSubKind.Simple }],
+    [{ name: 'varName', parse: identifierFromJson }, { name: 'value', parse: valueFromJson }]]
+];
+
+const schemaMapping: Map<string, { name: string, parse: (json: any) => any }[]> = new Map(schemaFields.map(([k, value]) => [stringKey(k), value]));
+
+
+/********
+ **** parse enum
+ ********/
+
+function parseEnum<Enum>(x: any, enum_: any): Enum {
+    const values = Object.keys(enum_).map(k => (enum_ as any)[k])
+
+    if (!values.includes(x)) {
+        debugger;
+        console.log("unknown value " + x)
+        throw new Error()
+    } else {
+        return x as Enum;
+    }
+}
+
+/*******************************************************
  **************** Value representation ******************
  *******************************************************/
 
-
-type ASSIGN = {
-    varName: Field | LocalIdentifier,
-    value: Literal | Object
-}
 
 type NODEID = NodeFormat | UnknownFormat
 
@@ -152,7 +471,7 @@ type Field = {
     type: 'Field',
     name: string,
     classDef: string,
-    obj: Object
+    obj: ObjectValue
 }
 
 type FieldInObject = {
@@ -166,7 +485,7 @@ type LocalIdentifier = {
     name: string
 }
 
-type Value = Literal | Object | ObjectWithoutFields;
+type Value = Literal | ObjectValue | ObjectWithoutFields;
 
 type NoResult = {
     type: 'NoResult'
@@ -178,7 +497,7 @@ type Literal = {
     value: number | string | boolean
 }
 
-type Object = {
+type ObjectValue = {
     type: 'Object',
     class: string,
     id: number,
@@ -199,26 +518,6 @@ type ObjectWithoutFields = {
 /********
  **** Implementation type
  ********/
-
-
-type PARAMS = {
-    eventId: EVENTID,
-    nodeId: NODEID,
-    data: any[]
-}
-
-/********
- **** constructors
- ********/
-
-
-const makeEventId = function (id: number): EVENTID {
-    return {
-        type: 'EVENTID',
-        id: id
-    };
-}
-
 
 const makeNodeId = function (id: string): NODEID {
     const result = sourceCodeCache().data()
@@ -256,54 +555,9 @@ const makeNoResult = function (): NoResult {
     };
 }
 
-const makeStatment = function (params: PARAMS): STATMENT {
-    return {
-        type: 'EVENT',
-        kind: EventKind.Statement,
-        eventId: params.eventId,
-        nodeId: params.nodeId,
-        result: makeNoResult()
-    };
-}
-
-
-const makeFlow = function (params: PARAMS): FLOW {
-    return {
-        type: 'EVENT',
-        kind: EventKind.Flow,
-        eventId: params.eventId,
-        nodeId: params.nodeId
-    };
-}
-
-
-const makeExpr = function (params: PARAMS): EXPRESSION {
-    return {
-        type: 'EVENT',
-        kind: EventKind.Expression,
-        eventId: params.eventId,
-        nodeId: params.nodeId,
-        result: params.data[0]
-    };
-}
-
-const makeUpdate = function (params: PARAMS): UPDATE {
-    const varName: any = identifierFromJson(params.data[0])
-    const value: any = valueFromJson(params.data[1])
-    return {
-        type: 'EVENT',
-        kind: EventKind.Update,
-        eventId: params.eventId,
-        nodeId: params.nodeId,
-        varName: varName,
-        value: value
-    };
-}
-
 /********
  **** value from Json
  ********/
-
 function valueFromJson(value: any): Value {
     const kind: string = value["type"]
     switch (kind) {
@@ -318,6 +572,12 @@ function valueFromJson(value: any): Value {
                 type: 'Literal',
                 kind: 'null',
                 value: 'null'
+            }
+        case "bool":
+            return {
+                type: 'Literal',
+                kind: 'bool',
+                value: Boolean(value['value'])
             }
         case "object":
             return {
@@ -372,99 +632,12 @@ function identifierFromJson(value: any): Identifier {
                 classDef: value["classDef"]
             }
         default:
+            return {
+                type: 'LocalIdentifier',
+                name: value
+            };
             debugger;
             throw new Error(value);
 
-    }
-}
-
-/**************
- ********* types api
- **************/
-
-
-/********
- **** EVENTID api
- ********/
-
-const eventIdRepr = function (id: EVENTID): string {
-    return id.id.toString();
-}
-
-
-/********
- **** UPDATE api
- ********/
-
-const assign = function (event: UPDATE): ASSIGN {
-    return { varName: event.varName, value: event.value };
-}
-
-/********
- **** EXPRESSION api
- ********/
-
-const result = function (event: EXPRESSION): Object | Literal {
-    return event.result;
-}
-
-
-/**************
- ********* parse event from array representation
- **************/
-
-/********
- **** parse event
- ********/
-
-const parseEvent = function (startLabel: any[], endLabel: any[]): EVENT {
-
-    console.assert(startLabel.length >= 3 && endLabel.length >= 3);
-
-    console.assert(startLabel[0] === endLabel[0] && startLabel[2] === endLabel[2]);
-
-    const eventId = makeEventId(labelEventId(startLabel));
-    const kind: string = startLabel[1];
-    const nodeId = makeNodeId(startLabel[2]);
-
-
-    const data = endLabel.slice(3);
-
-    const params: PARAMS = { eventId: eventId, nodeId: nodeId, data: data };
-
-    switch (kind) {
-        case 'statEnter':
-            return makeStatment(params);
-        case 'flowEnter':
-            return makeFlow(params);
-        case 'update':
-            return makeUpdate(params);
-        case 'exprEnter':
-            return makeExpr(params);
-        default:
-            throw new Error('unknown kind ' + kind);
-    }
-}
-
-
-/********
- **** helpers
- ********/
-
-
-const labelEventId = function (label: any[]): number {
-    if (label == undefined)
-        debugger;
-    return Number(label[0]);
-}
-
-//for now this helper is needed when parsing the csv, but we should find a way
-//to not show it to the outside world
-const isSingleLabel = function (label: any[]): boolean {
-    switch (label[1]) {
-        case 'update':
-            return true;
-        default:
-            return false;
     }
 }

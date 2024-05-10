@@ -1,27 +1,28 @@
 import {
-    RootEventTree,
-    POSITION,
-    scopedStateFromEventTree,
-    traceViewFromScopedState,
-    TraceIterator,
-    TRACEINDEX
-} from './eventTree'
-
-import {
-    ASSIGN,
     EVENT,
-    EventKinds,
+    EventKind,
     Value,
     Identifier,
-    Object,
+    ObjectValue,
     NODEID,
-    NodeFormat
+    NodeFormat,
+    Label,
+    UPDATE,
+    LabelPos,
+    EventSubKind,
+    Result,
+    Data,
+    Write,
+    writeIsDefined,
+    resultIsDefined
 } from './event';
+import { ScopedLabel } from './treeTransforms';
 export {
-    traceElement,
-    vbox,
-    objectElement,
-    hbox
+    isDisplayed,
+    labelItem,
+    initialContext,
+    propagateItemContext,
+    aggregateItemState
 };
 
 /**************
@@ -32,257 +33,112 @@ const Result_Style = 'result';
 const Update_Style = 'updates';
 const Click_Style = 'clickable';
 const Ast_Node_Syle = 'astNode';
-const HBox_Sytle = '';
-const VBox_Sytle = '';
-const Item_Sytle = '';
 const EmojiStart = 0x1F0C;
 const EmojiEnd = 0x1F9FF;
 const SPACE = '\u00A0';
 
 
+/*******************************************************
+ **************** transform ******************
+ *******************************************************/
+
 /**************
  ********* Types
  **************/
 
-interface UIElement {
-    display: (painter: Painter) => void
+interface LabelItem {
+    html: () => HTMLElement
 }
 
-interface Painter {
-    paint: (node: Node) => void
-}
-
-interface DisplayObject {
-    addObject: (obj: Object) => void
-}
-
-/**************
- ********* UI elements
- **************/
-
-/********
- **** Vbox
- ********/
-
-interface VBox extends UIElement {
-    update: () => void
-}
-
-function vbox(items: () => UIElement[]): VBox {
-    const box = divEl([], VBox_Sytle);
-    const painter: Painter = {
-        paint(node) {
-            box.appendChild(node)
-        }
-    }
-    items().map(item => item.display(painter));
-
-    return {
-        display(painter) {
-            painter.paint(box)
-        },
-        update() {
-            box.innerHTML = '';
-            items()
-                .map(item => item.display(painter))
-        }
-    }
-
-}
-
-/********
- **** Hbox
- ********/
-
-interface HBox extends UIElement {
-
-}
-
-function hbox(items: () => UIElement[]): HBox {
-    const cols = columns([])
-    const table = tableEl([cols], HBox_Sytle);
-
-    const painter: Painter = {
-        paint(node) {
-            cols.appendChild(cellElement(node))
-        }
-    }
-
-
-    items().map(item => item.display(painter));
-
-    return {
-        display(painter) {
-            painter.paint(table)
-        }
-    }
-
-}
-
-/********
- **** Item
- ********/
-
-
-interface Item extends UIElement {
-
-}
-
-function makeItem(content: Node[]): Item {
-    const node = divEl(content, Item_Sytle);
-    return {
-        display(painter) {
-            painter.paint(node);
-        }
-    }
-}
-
-/**************
- ********* Component UI
- **************/
-
-
-/********
- **** Trace UI
- ********/
-
-function traceElement(tree: RootEventTree, model: DisplayObject): UIElement {
-    const scopedStateTree = scopedStateFromEventTree<ASSIGNSTATE, IDENTCONTEXT>(
-        tree,
-        zero(),
-        updateState,
-        updateContext
-    );
-
-    const traceView = traceViewFromScopedState(scopedStateTree);
-    const windowSize = 40;
-    let startWindow = traceView.start;
-    const [idx, [assign, ident]] = startWindow.element
-    if (!isDisplayed(idx, assign, ident)) {
-        const next = nextDisplayEvent(startWindow)
-        startWindow = next !== undefined ? next : startWindow;
-    }
-
-    const items = function () {
-        let items = [];
-        let it: TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> | undefined = startWindow;
-        for (let count = 0; count < windowSize && it != undefined; ++count) {
-            items.push(it.element)
-            it = nextDisplayEvent(it)
-        }
-
-        return items.map(item => {
-            const [index, [state, ctx]] = item;
-            const event = index.event;
-            const nodes = astNodeElement(
-                ctx.ident,
-                event.nodeId,
-                state.assigns,
-                undefined,
-                model
-            );
-            return makeItem(nodes);
-        });
-    }
-
-    const box = vbox(items);
-
-    document.addEventListener("keypress", (event: KeyboardEvent) => {
-        const keyName = event.key;
-        switch (keyName) {
-            case 's':
-                const next = nextDisplayEvent(startWindow);
-                startWindow = next === undefined ? startWindow : next;
-                box.update()
-                break;
-            case 'w':
-                const prev = prevDisplayEvent(startWindow);
-                startWindow = prev === undefined ? startWindow : prev;
-                box.update()
-                break;
-        }
-
-    });
-
-    return box;
-}
-
-/********
- **** helpers to dispaly the trace
- ********/
-
-function prevDisplayEvent(iter: TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>): TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> | undefined {
-    let it: undefined | TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> = iter.predecessor();
-    while (it !== undefined) {
-        const [idx, [assign, ident]] = it.element
-        if (isDisplayed(idx, assign, ident)) {
-            return it;
-        }
-        it = it.predecessor();
-    }
-    return it;
-}
-
-function nextDisplayEvent(iter: TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]>): TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> | undefined {
-
-    let it: undefined | TraceIterator<[ASSIGNSTATE, IDENTCONTEXT]> = iter.successor();
-    while (it !== undefined) {
-        const [idx, [assign, ident]] = it.element
-        if (isDisplayed(idx, assign, ident)) {
-            return it;
-        }
-        it = it.successor();
-    }
-    return it;
-}
-
-function isDisplayed(idx: TRACEINDEX, assign: ASSIGNSTATE, ident: IDENTCONTEXT): boolean {
-    const event = idx.event
-    switch (idx.pos) {
-        case POSITION.START:
-            return false;
-        case POSITION.END:
-            return event.kind != EventKinds.Flow;
-        default:
-            return false;
-    }
-}
-
-
-/********
- **** utils
- ********/
-
-type IDENTCONTEXT = {
+type ItemContext = {
     ident: number
 }
 
-type ASSIGNSTATE = {
-    assigns: ASSIGN[]
+type ItemState = {
+    writes: Write[]
 }
 
-function zero(): IDENTCONTEXT {
-    return { ident: 0 };
+interface DisplayObject {
+    addObject: (obj: ObjectValue) => void
 }
 
-function updateContext(event: EVENT, ctx: IDENTCONTEXT): IDENTCONTEXT {
-    switch (event.kind) {
-        case EventKinds.Flow:
+/**************
+ ********* transforms
+ **************/
+
+function labelItem(label: ScopedLabel<ItemContext, ItemState>): LabelItem {
+    const ctx = label.context
+    const event = label.label.event
+    const state = label.state
+
+    if (event === undefined)
+        debugger;
+
+    return {
+        html: () => itemHtml(
+            ctx,
+            event.description.nodeId,
+            state.store.writes,
+            event.data,
+            { addObject: (obj: ObjectValue) => { } }
+        )
+    }
+}
+
+function isDisplayed(label: ScopedLabel<ItemContext, ItemState>): boolean {
+    const ctx = label.context
+    const l = label.label
+    const event = label.label.event
+    const state = label.state
+
+    switch (event.description.type.kind) {
+        case EventKind.Flow: return false;
+        case EventKind.Update: return false;
+        case EventKind.Expression:
+        case EventKind.Statement:
+            switch (event.description.type.subkind) {
+                case EventSubKind.Simple:
+                    return l.pos === LabelPos.END;
+                case EventSubKind.VoidCall:
+                case EventSubKind.ResultCall:
+                    return l.pos === LabelPos.CALL;
+                default:
+                    return false;
+            }
+    }
+}
+
+
+/**************
+ ********* Context/State computation
+ **************/
+
+const initialContext: ItemContext = {
+    ident: 0
+}
+
+
+
+function propagateItemContext(event: EVENT, ctx: ItemContext): ItemContext {
+    switch (event.description.type.kind) {
+        case EventKind.Flow:
             return { ident: ctx.ident + 1 };
         default:
             return ctx;
     }
 }
 
-function updateState(event: EVENT, states: ASSIGNSTATE[]): ASSIGNSTATE {
-    switch (event.kind) {
-        case EventKinds.Update:
-            return { assigns: [{ varName: event.varName, value: event.value }] }
+function aggregateItemState(event: EVENT, states: ItemState[]): ItemState {
+    switch (event.description.type.kind) {
+        case EventKind.Update:
+            const update: UPDATE = event as UPDATE
+            return { writes: writeIsDefined(update.data) ? [update.data] : [] };
+
         default:
             return {
-                assigns: states
-                    .map(s => s.assigns)
-                    .reduce((acc: ASSIGN[], val: ASSIGN[]) => acc.concat(val), [])
+                writes: states
+                    .map(s => s.writes)
+                    .reduce((acc: Write[], val: Write[]) => acc.concat(val), [])
             }
     }
 }
@@ -291,27 +147,27 @@ function updateState(event: EVENT, states: ASSIGNSTATE[]): ASSIGNSTATE {
  **** Object UI
  ********/
 
-function objectElement(obj: Object): UIElement {
-    let nodes: Node[] = [...line([
-        textEl(emojiUnicode(obj.id)),
-        textEl(':'),
-        textEl(shortClassName(obj.class))])]
+// function objectElement(obj: ObjectValue): UIElement {
+//     let nodes: Node[] = [...line([
+//         textEl(emojiUnicode(obj.id)),
+//         textEl(':'),
+//         textEl(shortClassName(obj.class))])]
 
-    const model: any = undefined
+//     const model: any = undefined
 
-    obj.fields
-        .map(field => {
-            const identifier = displayIdentifier(field.identifier, model)
-            const value = displayValue(field.value, model)
-            nodes.push(...line([
-                textEl(identationRepr(1)),
-                ...identifier,
-                textEl(" = "),
-                value
-            ]))
-        })
-    return makeItem(nodes);
-}
+//     obj.fields
+//         .map(field => {
+//             const identifier = displayIdentifier(field.identifier, model)
+//             const value = displayValue(field.value, model)
+//             nodes.push(...line([
+//                 textEl(identationRepr(1)),
+//                 ...identifier,
+//                 textEl(" = "),
+//                 value
+//             ]))
+//         })
+//     return makeItem(nodes);
+// }
 
 /********
  **** utils
@@ -323,103 +179,82 @@ function shortClassName(name: string): string {
 
 }
 
-/**************
- ********* UI for Event
- **************/
+/*******************************************************
+ **************** Html generation ******************
+ *******************************************************/
 
-function astNodeElement(
-    identation: number,
+
+
+
+function itemHtml(
+    ctx: ItemContext,
     node: NODEID,
-    assings: ASSIGN[] | undefined,
-    result: Value | undefined,
-    model: DisplayObject): Node[] {
+    assings: Write[],
+    data: Data,
+    model: DisplayObject): HTMLElement {
 
-    let event: Node[]
+
 
     switch (node.type) {
         case 'UnknownFormat':
-            return [textEl('unknown ' + node.line)]
+            return box(PrintWizardStyle.TraceItem, [textEl('unknown ' + node.line), brEl()])
 
         case 'NodeFormat':
-            return elementForKnownNodeFormat(
-                identation,
-                node,
-                assings,
-                result,
-                model)
+            const nodes = [
+                textBox(PrintWizardStyle.LineNumber, node.lineNumber.toString()),
+                textBox(PrintWizardStyle.Identation, identationRepr(ctx.ident)),
+                formatCode(node, assings.map(a => dataElement(a, model)), [dataElement(data, model)])
+            ]
+            return box(PrintWizardStyle.TraceItem, nodes)
 
     }
-}
-
-function elementForKnownNodeFormat(
-    identation: number,
-    node: NodeFormat,
-    assings: ASSIGN[] | undefined,
-    result: Value | undefined,
-    model: DisplayObject): Node[] {
-
-    let res: Node[] = []
-    if (result !== undefined) {
-        res.push(spanEl([textEl(" -> "), displayValue(result, model)], Result_Style));
-    }
-
-    let assigns_: Node[] = []
-    if (assings !== undefined) {
-        assigns_.push(...[
-            textEl(" "),
-            spanEl(displayAssigns(assings, model), Update_Style)
-        ])
-    }
-
-    return [
-        formatLineNumber(node.lineNumber),
-        textEl(identationRepr(identation)),
-        ... formatLine(node, assigns_, res)
-    ]
 }
 
 /********
  **** utils
  ********/
 
-function formatLineNumber(lineNumber: number): Node {
-    const constSize = 4;
-    const repr = lineNumber.toString();
-    console.assert(repr.length <= 4);
-    return textEl(SPACE.repeat(constSize - repr.length) + repr);
-}
 
-function formatLine(node: NodeFormat, assings: Node[], result: Node[]): Node[] {
+function formatCode(node: NodeFormat, assings: Node[], result: Node[]): HTMLElement {
     const line = node.line;
-    const before = line.slice(0,node.startCol);
-    const astFocused = line.slice(node.startCol,node.endCol)
+    const before = line.slice(0, node.startCol);
+    const evalutedExpression = line.slice(node.startCol, node.endCol)
     const after = line.slice(node.endCol)
-    return [
+    return box(PrintWizardStyle.Code, [
         textEl(before),
-        spanEl([textEl(astFocused)], Ast_Node_Syle),
-        ... result,
-        ... assings,
+        textBox(PrintWizardStyle.Expression, evalutedExpression),
+        ...result,
+        ...assings,
         textEl(after)
-    ];
+    ]);
 }
 
-function displayAssigns(assigns: ASSIGN[], model: DisplayObject): Node[] {
-    return assigns
-        .map(assign => displayAssign(assign, model))
-        .reduce((acc, assign) => {
-            if (acc.length > 0) {
-                acc.push(textEl(", "));
+
+function dataElement(data: Data, model: DisplayObject): HTMLElement {
+    switch (data.type) {
+        case 'empty':
+            return empty();
+        case 'result':
+            if (resultIsDefined(data)) {
+                return box(PrintWizardStyle.Result, [textEl("\u27A1"), displayValue(data.value as Value, model)]);
+            } else {
+                return empty();
             }
-            acc.push(...assign);
-            return acc;
-        }, [])
+        case 'write':
+            if (writeIsDefined(data)) {
+                return box(PrintWizardStyle.Write,
+                    [...displayIdentifier(data.varName as Identifier, model),
+                    textEl('='),
+                    displayValue(data.value as Value, model)
+                    ]
+                )
+            } else {
+                return empty();
+            }
+    }
 }
 
-function displayAssign(assigns: ASSIGN, model: DisplayObject): Node[] {
-    return [...displayIdentifier(assigns.varName, model),
-    textEl('='),
-    displayValue(assigns.value, model)]
-}
+
 
 /**************
  ********* UI for Identifier
@@ -484,13 +319,28 @@ function identationRepr(ident: number): string {
     return res === undefined ? '' : res;
 }
 
+/*******************************************************
+ **************** UI primitive  ******************
+ *******************************************************/
+
 /**************
- ********* UI utils
+ ********* styles
  **************/
 
-function line(elements: Node[]): Node[] {
-    return [...elements, brEl()]
+enum PrintWizardStyle {
+    LineNumber = 'line_number',
+    TraceItem = 'trace_item',
+    Identation = 'indentation',
+    Code = 'code',
+    Expression = 'expression',
+    Result = 'result',
+    Write = 'write'
 }
+
+/**************
+ ********* primitives
+ **************/
+
 
 function clickAction(elements: Node[], action: () => void): HTMLElement {
     let span = spanEl(elements, Click_Style);
@@ -508,49 +358,26 @@ function spanEl(elements: Node[], css: string | undefined): HTMLElement {
     return span;
 }
 
-function divEl(elements: Node[], css: string | undefined): HTMLElement {
-    let span = document.createElement("div");
-    elements.map(child => span.appendChild(child));
-
-    if (css !== undefined) {
-        span.className = css;
-    }
-    return span;
+function empty(): HTMLElement {
+    return spanEl([], undefined);
 }
 
-function tableEl(rows: HTMLTableRowElement[], css: string | undefined): HTMLElement {
-    let table = document.createElement("table");
-    rows.map(row => table.appendChild(row));
-
-    setCssClass(table, css);
-    return table;
+function textBox(style: PrintWizardStyle, txt: string) {
+    let b = box(style, [])
+    b.appendChild(textEl(txt))
+    return b;
 }
 
-function columns(cols: Node[]): HTMLTableRowElement {
-    const row = document.createElement("tr");
-    cols
-        .map(col => {
-            const cell = cellElement(col);
-            row.appendChild(cell);
-        })
-    return row;
-}
-
-function cellElement(node: Node): HTMLTableCellElement {
-    const cell = document.createElement("td");
-    cell.appendChild(node);
-    return cell;
+function box(style: PrintWizardStyle, elements: Node[]) {
+    let div = document.createElement("div");
+    div.className = style;
+    elements.map(child => div.appendChild(child));
+    return div;
 }
 
 
 function brEl(): HTMLElement {
     return document.createElement("br");
-}
-
-function setCssClass(node: HTMLElement, css: string | undefined) {
-    if (css !== undefined) {
-        node.className = css;
-    }
 }
 
 

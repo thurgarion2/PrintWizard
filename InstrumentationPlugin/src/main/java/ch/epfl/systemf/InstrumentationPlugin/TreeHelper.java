@@ -102,6 +102,12 @@ public class TreeHelper {
         );
     }
 
+    public JCTree.JCExpression objectArray(List<? extends Symbol> values){
+        JCTree.JCNewArray arr =  mkTree.NewArray(mkTree.Type(objectP), List.of(mkTree.Literal(values.size())), values.map(mkTree::Ident));
+        arr.setType(new Type.ArrayType(objectP, symb.arrayClass));
+        return arr;
+    }
+
     public Symbol.MethodSymbol staticMethod(Symbol.ClassSymbol owner, String name,  List<Type> args, Type ret){
         return new Symbol.MethodSymbol(Flags.PUBLIC|Flags.STATIC,
                 name(name),

@@ -21,11 +21,11 @@ const index = function (req, res) {
         });
 };
 
-const eventTrace = function (req, res) {
+const css = function (req, res) {
 
-    fs.readFile('./../eventTrace.json')
+    fs.readFile('./printwizard.css')
         .then(contents => {
-            res.setHeader("Content-Type", "text/csv");
+            res.setHeader("Content-Type", "text/css");
             res.writeHead(200);
             res.end(contents);
         })
@@ -36,9 +36,9 @@ const eventTrace = function (req, res) {
         });
 };
 
-const sourceFormat = function (req, res) {
+const exposeFile = function (req, res, path) {
 
-    fs.readFile('./../source_format.json')
+    fs.readFile(path)
         .then(contents => {
             res.setHeader("Content-Type", "application/json");
             res.writeHead(200);
@@ -50,6 +50,7 @@ const sourceFormat = function (req, res) {
             return;
         });
 };
+
 
 const exposeModule = function (req, res, path) {
 
@@ -72,11 +73,14 @@ const requestListener = function (req, res) {
         case "/":
             index(req, res)
             break
+        case "/printwizard":
+            css(req, res)
+            break
         case "/eventTrace":
-            eventTrace(req, res)
+            exposeFile(req, res, './../eventTrace.json')
             break
         case "/sourceFormat":
-            sourceFormat(req, res)
+            exposeFile(req, res, './../source_format.json')
             break
         case "/displayTrace":
             exposeModule(req, res, './modules/displayTrace.js');
@@ -84,8 +88,8 @@ const requestListener = function (req, res) {
         case "/event":
             exposeModule(req, res, './build/event.js');
             break;
-        case "/eventTree":
-            exposeModule(req, res, './build/eventTree.js');
+        case "/treeTransforms":
+            exposeModule(req, res, './build/treeTransforms.js');
             break;
         case "/display":
             exposeModule(req, res, './build/display.js');

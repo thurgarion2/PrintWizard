@@ -1,6 +1,7 @@
 package ch.epfl.systemf;
 
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONWriter;
 
@@ -22,6 +23,7 @@ public class FileLogger {
             long eventId = switch (pos){
                 case START -> enterEvent();
                 case END -> exitEvent();
+                case CALL -> currentEvent();
                 case UPDATE -> nextId();
             };
 
@@ -68,16 +70,40 @@ public class FileLogger {
         }
     }
 
-    public static final class VoidStatement extends Event {
+    public static final class ResultCall extends Event {
 
         public static Data data(LabelPos pos) {
             return new Empty();
         }
 
-        private static final EventType type = new EventType("statement", "void");
+        private static final EventType type = new EventType("statement", "resultCall");
+
+        public static int enter(String nodeId) {
+
+            return Event.logLabel(type, LabelPos.START, nodeId, new Empty());
+        }
+        public static int call(String nodeId, Object[]  argValues){
+            return Event.logLabel(type, LabelPos.CALL, nodeId, new Call(List.of(argValues)));
+        }
+
+        public static int exit(String nodeId, Object result) {
+            return Event.logLabel(type, LabelPos.END, nodeId, new Result(result));
+        }
+    }
+
+    public static final class VoidCall extends Event {
+
+        public static Data data(LabelPos pos) {
+            return new Empty();
+        }
+
+        private static final EventType type = new EventType("statement", "callVoid");
 
         public static int enter(String nodeId) {
             return Event.logLabel(type, LabelPos.START, nodeId, new Empty());
+        }
+        public static int call(String nodeId, Object[]  argValues){
+            return Event.logLabel(type, LabelPos.CALL, nodeId, new Call(List.of(argValues)));
         }
 
         public static int exit(String nodeId) {
@@ -151,6 +177,14 @@ public class FileLogger {
         }
     }
 
+    record Call(List<Object> argValues) implements Data {
+
+        @Override
+        public List<Object> jsonArray() {
+            return List.of(new JSONArray(argValues.stream().map(FileLogger::valueRepr).toList()));
+        }
+    }
+
     static final class Write implements Data {
         final String name;
         final Object value;
@@ -174,6 +208,7 @@ public class FileLogger {
     public enum LabelPos {
         START("start"),
         UPDATE("update"),
+        CALL("call"),
         END("end");
 
         private final String token;
@@ -261,6 +296,9 @@ public class FileLogger {
             }
             case Long l -> {
                 yield simpleValue("long", l);
+            }
+            case Boolean b -> {
+                yield simpleValue("bool", b);
             }
             default -> throw new UnsupportedOperationException();
         };
