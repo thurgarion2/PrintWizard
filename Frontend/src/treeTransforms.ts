@@ -61,8 +61,8 @@ function scopedTreeTransform<Context, State>(
                 state = aggregate(label.event, childStates)
                 s['store'] = state as State
 
-                
-                return [ label.event.description.type.kind === EventKind.Flow ? [] : [state], index]
+                const kind = label.event.description.kind
+                return [ kind === EventKind.Flow ? [] : [state], index]
             case LabelPos.CALL:
             case LabelPos.END:
                 console.log("label end without label start")

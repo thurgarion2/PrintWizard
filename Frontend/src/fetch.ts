@@ -1,4 +1,4 @@
-export {initCache, sourceCodeCache, traceCache}
+export {initCache, sourceCodeCache, traceCache, objectDataCache}
 
 
 /*******************************************************
@@ -30,6 +30,7 @@ interface DataCache<A>{
 
 let sourceCode : DataCache<any> 
 let trace : DataCache<any>
+let objectData : DataCache<any>
 
 /**************
  ********* Functions
@@ -38,6 +39,7 @@ let trace : DataCache<any>
 async function initCache(){
     sourceCode = await loadAllData(fetchSourceFormat)
     trace = await loadAllData(fetchEventTrace)
+    objectData = await loadAllData(fetchSourceObjectData)
 }
 
 
@@ -47,6 +49,10 @@ function sourceCodeCache() : DataCache<any> {
 
 function traceCache() : DataCache<any> {
     return trace
+}
+
+function objectDataCache() : DataCache<any> {
+    return objectData
 }
 
 
@@ -84,6 +90,13 @@ function fetchEventTrace() {
 
 function fetchSourceFormat() {
     return fetch('sourceFormat')
+        .then(response => {
+            return response.json()
+        })
+}
+
+function fetchSourceObjectData() {
+    return fetch('objectData')
         .then(response => {
             return response.json()
         })

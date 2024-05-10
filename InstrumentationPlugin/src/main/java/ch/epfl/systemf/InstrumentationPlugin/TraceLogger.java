@@ -46,12 +46,13 @@ public interface TraceLogger {
 
     public JCTree.JCExpression logStatement(JCTree.JCExpression statement, Symbol.MethodSymbol currentMethod);
 
+    public JCTree.JCExpression logNewClassStatement(JCTree.JCNewClass call, Symbol.MethodSymbol currMethod);
+
+    public JCTree.JCExpression logAssignOpStatement(JCTree.JCAssignOp assign, Symbol.MethodSymbol currMethod);
+
     /*******************************************************
      **************** Expression ******************
      *******************************************************/
-
-
-    public JCTree.JCExpression logCallExpr(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod);
 
     public JCTree.JCExpression logUnaryExpr(JCTree.JCUnary unary, Symbol.MethodSymbol currMethod);
 

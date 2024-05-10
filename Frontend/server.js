@@ -37,7 +37,6 @@ const css = function (req, res) {
 };
 
 const exposeFile = function (req, res, path) {
-
     fs.readFile(path)
         .then(contents => {
             res.setHeader("Content-Type", "application/json");
@@ -45,6 +44,7 @@ const exposeFile = function (req, res, path) {
             res.end(contents);
         })
         .catch(err => {
+            console.log(err)
             res.writeHead(500);
             res.end(err);
             return;
@@ -81,6 +81,9 @@ const requestListener = function (req, res) {
             break
         case "/sourceFormat":
             exposeFile(req, res, './../source_format.json')
+            break
+        case "/objectData":
+            exposeFile(req, res, './../objectData.json')
             break
         case "/displayTrace":
             exposeModule(req, res, './modules/displayTrace.js');

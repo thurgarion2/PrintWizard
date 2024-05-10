@@ -5,12 +5,11 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.List;
-import com.sun.tools.javac.util.Name;
+import com.sun.tools.javac.util.Pair;
 
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 public class JsonFileLogger implements TraceLogger {
     private final TreeHelper helper;
@@ -41,15 +40,14 @@ public class JsonFileLogger implements TraceLogger {
     public JCTree.JCStatement logForLoop(JCTree.JCForLoop loop, Symbol.MethodSymbol currMethod) {
         NodeIdFactory.NodeId loopId = makeNodeId.mutipleLineNode;
 
-        loop.body = enterFlow(loop.body, loopId);
-        loop.step = loop.step.append(mkTree.Exec(callLogger.simpleFlow.exit(loopId.identifier())));
-        return enterExitFlow(loop, makeNodeId.mutipleLineNode);
+        loop.body = enterExitFlow(loop.body, loopId);
+        return loop;//enterExitFlow(loop, makeNodeId.mutipleLineNode);
     }
 
     @Override
     public JCTree.JCStatement logWhileLoop(JCTree.JCWhileLoop loop, Symbol.MethodSymbol currMethod) {
         loop.body = enterExitFlow(loop.body, makeNodeId.mutipleLineNode);
-        return enterExitFlow(loop, makeNodeId.mutipleLineNode);
+        return loop;//enterExitFlow(loop, makeNodeId.mutipleLineNode);
     }
 
     @Override
@@ -62,7 +60,7 @@ public class JsonFileLogger implements TraceLogger {
         if (elsePart != null) {
             branch.elsepart = enterExitFlow(elsePart, makeNodeId.mutipleLineNode);
         }
-        return enterExitFlow(branch, makeNodeId.mutipleLineNode);
+        return branch;//enterExitFlow(branch, makeNodeId.mutipleLineNode);
     }
 
     @Override
@@ -108,7 +106,7 @@ public class JsonFileLogger implements TraceLogger {
                 varDecl.init,
                 varDecl.type,
                 makeNodeId.nodeId(varDecl),
-                varDecl.name.toString(),
+                new Logger.LocalIdentifier(varDecl.name.toString()),
                 currMethod
         );
 
@@ -174,7 +172,10 @@ public class JsonFileLogger implements TraceLogger {
     }
 
     private List<Symbol.VarSymbol> argsSymbols(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod){
-        List<Type> argTypes = call.getMethodSelect().type.getParameterTypes();
+        return argsSymbols(call.getMethodSelect().type.getParameterTypes(), currMethod);
+    }
+
+    private List<Symbol.VarSymbol> argsSymbols(List<Type> argTypes, Symbol.MethodSymbol currMethod){
         return List.from(IntStream.range(0, argTypes.size())
                 .mapToObj(i -> new Symbol.VarSymbol(0, helper.name("**arg" + i), argTypes.get(i), currMethod))
                 .toList()
@@ -188,13 +189,80 @@ public class JsonFileLogger implements TraceLogger {
 
         NodeIdFactory.NodeId id = makeNodeId.nodeId(unary);
 
-        JCTree.JCExpression withUpdate = logUpdate(unary, unary.type, id, name, currMethod);
+        JCTree.JCExpression withUpdate = extractIdentifier(
+                (result) -> {
+                    unary.arg = result.snd;
+                    return logUpdate(unary, unary.type, id, result.fst, currMethod);
+                },
+                unary.getExpression(),
+                unary.type,
+                currMethod
+        );
         return enterExitStatement(withUpdate, unary.type, id, currMethod);
     }
 
     @Override
-    public JCTree.JCExpression logAssignStatement(JCTree.JCAssign result, Symbol.MethodSymbol currentMethod) {
-        throw new UnsupportedOperationException();
+    public JCTree.JCExpression logAssignStatement(JCTree.JCAssign assign, Symbol.MethodSymbol currentMethod) {
+        NodeIdFactory.NodeId id = makeNodeId.nodeId(assign);
+        JCTree.JCExpression tmp = extractIdentifier(
+                (result) -> {
+                    assign.lhs = result.snd;
+                    return assignHelper(assign, id, result.fst, currentMethod);
+                },
+                assign.lhs,
+                assign.type,
+                currentMethod
+        );
+        return tmp;
+    }
+
+    @Override
+    public JCTree.JCExpression logAssignOpStatement(JCTree.JCAssignOp assign, Symbol.MethodSymbol currMethod) {
+        NodeIdFactory.NodeId id = makeNodeId.nodeId(assign);
+        return extractIdentifier(
+                (result) -> {
+                    assign.lhs = result.snd;
+                    return assignHelper(assign, id, result.fst, currMethod);
+                },
+                assign.lhs,
+                assign.type,
+                currMethod
+        );
+    }
+
+    //it must wrap around a log function => context must return an int
+    private JCTree.JCExpression extractIdentifier(Function<Pair<Logger.Identifier, JCTree.JCExpression>, JCTree.JCExpression> context, JCTree.JCExpression identifier, Type ret, Symbol currMethod){
+        switch (identifier){
+            case JCTree.JCIdent ident:
+                return context.apply(new Pair<>(new Logger.LocalIdentifier(ident.toString()), ident));
+            case JCTree.JCFieldAccess select: {
+                Symbol.VarSymbol ref = new Symbol.VarSymbol(0, helper.name("&&&"), select.selected.type, currMethod);
+                JCTree.JCExpression selected = select.selected;
+                select.selected = mkTree.Ident(ref);
+
+                return mkTree.LetExpr(mkTree.VarDef(ref, selected),
+                        context.apply(new Pair<>(new Logger.FieldIdentifier(ref, select.name.toString()), select))
+                ).setType(ret);
+            }
+            default: throw new UnsupportedOperationException();
+        }
+    }
+
+    private JCTree.JCExpression assignHelper(JCTree.JCExpression assign, NodeIdFactory.NodeId id, Logger.Identifier identifier, Symbol.MethodSymbol currMethod){
+
+        JCTree.JCExpression withUpdate = logUpdate(
+                assign,
+                assign.type,
+                id,
+                identifier,
+                currMethod
+        );
+
+        return enterExitStatement(
+                withUpdate,
+                assign.type,
+                id,
+                currMethod);
     }
 
     @Override
@@ -202,25 +270,48 @@ public class JsonFileLogger implements TraceLogger {
         return enterExitStatement(statement, statement.type, makeNodeId.nodeId(statement), currentMethod);
     }
 
+    @Override
+    public JCTree.JCExpression logNewClassStatement(JCTree.JCNewClass call, Symbol.MethodSymbol currMethod) {
+
+        List<Symbol.VarSymbol> symbols = argsSymbols(call.constructorType.getParameterTypes(), currMethod);
+        Symbol.VarSymbol logMethod = new Symbol.VarSymbol(0, helper.name("+++"), helper.intP, currMethod);
+
+        NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
+
+        JCTree.JCExpression logArgsAndCall = mkTree.LetExpr(
+                storeArgValues(symbols, call.args).append(mkTree.VarDef(logMethod, callLogger.resultCall.callStatic(id.identifier(), "", symbols))),
+                call
+        ).setType(call.type);
+        call.args = symbols.map(mkTree::Ident);
+
+        return applyBeforeAfter(logArgsAndCall,
+                call.type,
+                () -> callLogger.resultCall.enter(id.identifier()),
+                s -> callLogger.resultCall.exit(id.identifier(), s),
+                currMethod);
+    }
+
+
 
     /**************
      ********* Expression
      **************/
-
-
-    @Override
-    public JCTree.JCExpression logCallExpr(JCTree.JCMethodInvocation call, Symbol.MethodSymbol currMethod) {
-        if (call.type.equals(helper.voidP))
-            throw new IllegalArgumentException("cannot assign void to variable");
-        return enterExitExpression(call, call.type, makeNodeId.nodeId(call), currMethod);
-    }
 
     @Override
     public JCTree.JCExpression logUnaryExpr(JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
         String name = unary.getExpression().toString();
 
         NodeIdFactory.NodeId id = makeNodeId.nodeId(unary);
-        JCTree.JCExpression withUpdate = logUpdate(unary, unary.type, id, name, currMethod);
+        //nearly the same code as statement we should factor it, if one change likely the other
+        JCTree.JCExpression withUpdate = extractIdentifier(
+                (result) -> {
+                    unary.arg = result.snd;
+                    return logUpdate(unary, unary.type, id, result.fst, currMethod);
+                },
+                unary.getExpression(),
+                unary.type,
+                currMethod
+        );
 
         return enterExitExpression(withUpdate,
                 unary.type,
@@ -302,12 +393,12 @@ public class JsonFileLogger implements TraceLogger {
     private JCTree.JCExpression logUpdate(JCTree.JCExpression expr,
                                           Type exprType,
                                           NodeIdFactory.NodeId id,
-                                          String name,
+                                          Logger.Identifier identifier,
                                           Symbol.MethodSymbol method) {
 
         return applyAfter(expr,
                 exprType,
-                symbol -> callLogger.update.writeLocal(id.identifier(), name, symbol),
+                symbol -> callLogger.update.write(id.identifier(), identifier, symbol),
                 method);
     }
 

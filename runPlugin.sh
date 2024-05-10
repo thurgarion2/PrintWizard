@@ -15,5 +15,5 @@ javac -processorpath ./InstrumentationPlugin/target/classes \
   -J--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED \
   -J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED \
   -J--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED \
-  Exemple.java
+  Supermarket.java
 #  -J-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:8800 \

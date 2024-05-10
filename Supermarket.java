@@ -3,9 +3,7 @@ public class Supermarket {
     public static void main(String[] args) {
         Article cheese = new Article("cheese", new DollarAmount(5));
         Article bread = new Article("white bread", new DollarAmount(2));
-        Article gameboy = new Article(
-                "gameboy",
-                new DollarAmount(100));
+        Article gameboy = new Article("gameboy", new DollarAmount(100));
 
         ShoppingKart myKart = new ShoppingKart();
         myKart.addItem(cheese, 10);
@@ -28,7 +26,7 @@ public class Supermarket {
         public int articlesPrice(){
             int price = 0;
             for(MyList<Article> l = articles; l!=null; l=l.tail){
-                price += l.elem.price.amount;
+                //price += l.elem.price.amount;
             }
             return price;
         }
@@ -57,13 +55,14 @@ public class Supermarket {
         public final int amount;
 
         public DollarAmount(int  amount){
+            DollarAmount t = this;
             this.amount = amount;
         }
     }
 
     public static class Article{
         private final String name;
-        private final DollarAmount price;
+        private final  DollarAmount price;
 
         public Article(String name, DollarAmount price){
             this.name = name;

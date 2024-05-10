@@ -57,23 +57,36 @@ public class Logger {
         private static final TreeHelper.SimpleClass clazz = innerClass("Update");
 
 
-        public JCTree.JCExpression writeLocal(String nodeId, String name, Symbol value) {
-            return helper.callStaticMethod(
-                    clazz,
-                    "writeLocal",
-                    List.of(helper.string, helper.string, helper.objectP),
-                    helper.intP,
-                    List.of(mkTree.Literal(nodeId), mkTree.Literal(name), mkTree.Ident(value)));
+        public JCTree.JCExpression write(String nodeId, Identifier identifier, Symbol value) {
+            switch (identifier) {
+                case LocalIdentifier local:
+                    return helper.callStaticMethod(
+                            clazz,
+                            "writeLocal",
+                            List.of(helper.string, helper.string, helper.objectP),
+                            helper.intP,
+                            List.of(mkTree.Literal(nodeId), mkTree.Literal(local.name), mkTree.Ident(value)));
+                case FieldIdentifier field:
+                    return helper.callStaticMethod(
+                            clazz,
+                            "writeField",
+                            List.of(helper.string, helper.objectP, helper.string, helper.objectP),
+                            helper.intP,
+                            List.of(mkTree.Literal(nodeId), mkTree.Ident(field.fieldOwner), mkTree.Literal(field.fieldName), mkTree.Ident(value)));
+
+            }
+
         }
 
-        public JCTree.JCExpression writeField(String nodeId, Symbol fieldOwner, String name, Symbol value) {
-            return helper.callStaticMethod(
-                    clazz,
-                    "writeField",
-                    List.of(helper.string, helper.objectP, helper.string, helper.objectP),
-                    helper.intP,
-                    List.of(mkTree.Literal(nodeId), mkTree.Ident(fieldOwner), mkTree.Literal(name), mkTree.Ident(value)));
-        }
+    }
+
+    sealed interface Identifier {
+    }
+
+    record LocalIdentifier(String name) implements Identifier {
+    }
+
+    record FieldIdentifier(Symbol fieldOwner, String fieldName) implements Identifier {
     }
 
     /**************

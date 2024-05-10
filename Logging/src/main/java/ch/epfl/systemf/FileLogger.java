@@ -6,6 +6,7 @@ import org.json.JSONObject;
 import org.json.JSONWriter;
 
 import java.io.*;
+import java.lang.ref.WeakReference;
 import java.util.*;
 import java.util.stream.Stream;
 
@@ -28,9 +29,9 @@ public class FileLogger {
             };
 
 
-            json.array();
-            pos.serializeToJson(type, new DynamicEventInfo(eventId, nodeId), data).forEach(json::value);
-            json.endArray();
+            traceWriter.array();
+            pos.serializeToJson(type, new DynamicEventInfo(eventId, nodeId), data).forEach(traceWriter::value);
+            traceWriter.endArray();
             return 0;
         }
 
@@ -97,7 +98,7 @@ public class FileLogger {
 
         public static int writeField(String nodeId, Object owner, String name, Object result) {
             return Event.logLabel(type, LabelPos.UPDATE, nodeId, List.of(
-                    new Write(new FieldIdentifier(Reference.write("", owner), name),
+                    new Write(new FieldIdentifier(Reference.write(null, owner), name),
                             result)));
         }
     }
@@ -117,7 +118,7 @@ public class FileLogger {
         //exactly one value of className and owner should be null
         public static int call(String nodeId, String className, Object owner, Object[] argValues) {
             Reference ownerRef = Reference.read(className, owner);
-            return Event.logLabel(type, LabelPos.CALL, nodeId, List.of(ownerRef, new ArgsValues(List.of(argValues))));
+            return Event.logLabel(type, LabelPos.CALL, nodeId, List.of(ownerRef, new ArgsValues(argValues)));
         }
 
         public static int exit(String nodeId, Object result) {
@@ -135,7 +136,7 @@ public class FileLogger {
         //exactly one value of className and owner should be null
         public static int call(String nodeId, String className, Object owner, Object[] argValues) {
             Reference ownerRef = Reference.read(className, owner);
-            return Event.logLabel(type, LabelPos.CALL, nodeId, List.of(ownerRef, new ArgsValues(List.of(argValues))));
+            return Event.logLabel(type, LabelPos.CALL, nodeId, List.of(ownerRef, new ArgsValues(argValues)));
         }
 
         public static int exit(String nodeId) {
@@ -170,6 +171,28 @@ public class FileLogger {
     }
 
     /*******************************************************
+     **************** File logger ******************
+     *******************************************************/
+
+    static class JsonFileWriter implements AutoCloseable{
+        private final  FileWriter  file;
+        private final  BufferedWriter writer;
+        public final  JSONWriter json;
+
+        public JsonFileWriter(String fileName) throws IOException {
+            file = new FileWriter(fileName);
+            writer = new BufferedWriter(file);
+            json = new JSONWriter(writer);
+        }
+
+        @Override
+        public void close() throws Exception {
+            writer.close();
+            file.close();
+        }
+    }
+
+    /*******************************************************
      **************** data structures ******************
      *******************************************************/
 
@@ -180,13 +203,11 @@ public class FileLogger {
 
 
     private static long eventCounter = 0;
-    private final static String fileName = "eventTrace.json";
+    private final static String traceFileName = "eventTrace.json";
+    private final static String objectDataFileName = "objectData.json";
 
-    private final static OutputStream out;
-    private final static OutputStreamWriter writer;
-
-    private final static BufferedWriter print;
-    private final static JSONWriter json;
+    private final static JSONWriter traceWriter;
+    private final static JSONWriter objectDataWriter;
 
 
     /*******************************************************
@@ -194,37 +215,34 @@ public class FileLogger {
      *******************************************************/
 
     static {
+        JsonFileWriter trace;
+        JsonFileWriter objectData;
         try {
-            out = new FileOutputStream(fileName);
-        } catch (FileNotFoundException e) {
+            trace = new JsonFileWriter(traceFileName);
+            objectData = new JsonFileWriter(objectDataFileName);
+        } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        writer = new OutputStreamWriter(out);
-        print = new BufferedWriter(writer);
-        json = new JSONWriter(print);
-        json.object();
 
+        traceWriter = trace.json;
+        traceWriter.object();
         // trace field an array
-        json.key("trace");
-        json.array();
+        traceWriter.key("trace");
+        traceWriter.array();
+
+        objectDataWriter = objectData.json;
+        objectDataWriter.object();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
-                if (json != null) {
-                    json.endArray();
-                    json.endObject();
-                }
+                traceWriter.endArray();
+                traceWriter.endObject();
 
-                if (print != null) {
-                    print.close();
-                }
-                if (writer != null) {
-                    writer.close();
-                }
-                if (out != null) {
-                    out.close();
-                }
-            } catch (IOException e) {
+                objectDataWriter.endObject();
+
+                trace.close();
+                objectData.close();
+            } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }));
@@ -248,13 +266,13 @@ public class FileLogger {
         }
     }
 
-    record ArgsValues(List<Object> argValues) implements Data {
+    record ArgsValues(Object[] argValues) implements Data {
 
         @Override
         public JSONObject json() {
             return new JSONObject(Map.of(
                     "dataType", "argsValues",
-                    "values", new JSONArray(argValues.stream().map(FileLogger::valueRepr).toList())));
+                    "values", new JSONArray(Arrays.stream(argValues).map(FileLogger::valueRepr).toList())));
 
         }
     }
@@ -275,17 +293,68 @@ public class FileLogger {
 
 
     public sealed interface Reference extends Data {
+        Map<Object, Integer> versions = new HashMap<>();
+
         //call if the field of a reference is only read
         static Reference read(String fullClassName, Object ref) {
-            return reference(fullClassName, ref, 0);
+            return reference(fullClassName, ref);
         }
 
         //call if we write to the field of a reference
+        //we only save an object when we write to its fields for now, if you want to change it you should also change valueRepr
+        //to avoid infinite loop
+        //Bug : a function that we have not instrumented could return an object then we would not have access to its values
         static Reference write(String fullClassName, Object ref) {
-            return reference(fullClassName, ref, 0);
+            if(ref!=null){
+                versions.put(ref, versions.getOrDefault(ref,0)+1);
+                InstanceReference r = (InstanceReference) reference(fullClassName, ref);
+                saveObject(r, ref);
+                return r;
+            }
+
+            return reference(fullClassName, ref);
         }
 
-        private static Reference reference(String fullClassName, Object ref, int version) {
+        private static void saveObject(InstanceReference ref, Object obj) {
+            List<Field> fs = fields(obj.getClass())
+                    .map(f -> {
+                        try {
+                            return new Field(
+                                    new FieldIdentifier(ref, f.getName()),
+                                    valueRepr(f.get(obj)));
+                        } catch (IllegalAccessException e) {
+                            throw new RuntimeException(e);
+                        }
+                    })
+                    .toList();
+            ObjectData data = new ObjectData(ref, fs);
+            objectDataWriter.key(ref.hashPointer+"-"+ref.version);
+            objectDataWriter.value(data.json());
+        }
+
+        record ObjectData(Reference self, List<Field> fields) {
+            public JSONObject json(){
+                return new JSONObject()
+                        .put("self", self.json())
+                        .put("fields", new JSONArray(fields.stream().map(Field::json).toList()));
+            }
+        }
+
+        record Field(FieldIdentifier identifier, Object value) {
+            public JSONObject json(){
+                return new JSONObject()
+                        .put("identifier", identifier.json())
+                        .put("value", valueRepr(value));
+            }
+        }
+
+        private static Stream<java.lang.reflect.Field> fields(Class<?> clazz) {
+            return Stream.empty();
+        }
+
+
+
+        private static Reference reference(String fullClassName, Object ref) {
             if ((fullClassName == null && ref == null) || (fullClassName != null && ref != null)) {
                 throw new IllegalArgumentException();
             }
@@ -295,14 +364,14 @@ public class FileLogger {
                 index = index == -1 ? 0 : index;
                 return new StaticReference(
                         new ClassIdentifier(fullClassName.substring(0, index), fullClassName.substring(index)),
-                        version);
+                        0);
             } else {
                 Class<?> clazz = ref.getClass();
 
                 return new InstanceReference(
                         new ClassIdentifier(clazz.getPackageName(), clazz.getSimpleName()),
                         System.identityHashCode(ref),
-                        version);
+                        versions.getOrDefault(ref,0));
             }
         }
     }
@@ -323,7 +392,7 @@ public class FileLogger {
         public JSONObject json() {
             return new JSONObject(Map.of(
                     "dataType", "instanceRef",
-                    "object", clazz.json(),
+                    "className", clazz.json(),
                     "pointer", hashPointer,
                     "version", version));
         }
@@ -335,38 +404,6 @@ public class FileLogger {
                     "packageName", packageName,
                     "className", className));
         }
-    }
-
-    /*******************************************************
-     **************** Object Data ******************
-     *******************************************************/
-
-    //we should also have a mechanism to save class variables
-    static ObjectData saveObject(Object obj) {
-        Reference self = Reference.write("", obj);
-        List<Field> fs = fields(obj.getClass())
-                .map(f -> {
-                    try {
-                        return new Field(
-                                new FieldIdentifier(self, f.getName()),
-                                valueRepr(f.get(obj)));
-                    } catch (IllegalAccessException e) {
-                        throw new RuntimeException(e);
-                    }
-                })
-                .toList();
-        return new ObjectData(self, fs);
-    }
-
-    // store all data from an object
-    record ObjectData(Reference self, List<Field> fields) {
-    }
-
-    record Field(FieldIdentifier identifier, Object value) {
-    }
-
-    public static Stream<java.lang.reflect.Field> fields(Class<?> clazz) {
-        return Stream.empty();
     }
 
 

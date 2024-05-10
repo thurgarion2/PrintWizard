@@ -1,21 +1,21 @@
 import {
     EVENT,
-    EventKind,
+    InstanceReference,
     Value,
     Identifier,
-    ObjectValue,
     NODEID,
     NodeFormat,
-    Label,
     UPDATE,
     LabelPos,
-    EventSubKind,
     Result,
+    EventKind,
+    EventSubKind,
+    DataType,
     Data,
     Write,
-    writeIsDefined,
-    resultIsDefined
+    FieldIdentifier
 } from './event';
+import { objectDataCache } from './fetch';
 import { ScopedLabel } from './treeTransforms';
 export {
     isDisplayed,
@@ -29,10 +29,6 @@ export {
  ********* CONSTANTS
  **************/
 
-const Result_Style = 'result';
-const Update_Style = 'updates';
-const Click_Style = 'clickable';
-const Ast_Node_Syle = 'astNode';
 const EmojiStart = 0x1F0C;
 const EmojiEnd = 0x1F9FF;
 const SPACE = '\u00A0';
@@ -59,7 +55,7 @@ type ItemState = {
 }
 
 interface DisplayObject {
-    addObject: (obj: ObjectValue) => void
+    inspect: (obj: InstanceReference) => void
 }
 
 /**************
@@ -71,16 +67,12 @@ function labelItem(label: ScopedLabel<ItemContext, ItemState>): LabelItem {
     const event = label.label.event
     const state = label.state
 
-    if (event === undefined)
-        debugger;
-
     return {
         html: () => itemHtml(
             ctx,
-            event.description.nodeId,
+            event.instanceInfo.nodeId,
             state.store.writes,
-            event.data,
-            { addObject: (obj: ObjectValue) => { } }
+            event
         )
     }
 }
@@ -91,20 +83,22 @@ function isDisplayed(label: ScopedLabel<ItemContext, ItemState>): boolean {
     const event = label.label.event
     const state = label.state
 
-    switch (event.description.type.kind) {
+    switch (event.description.kind) {
         case EventKind.Flow: return false;
         case EventKind.Update: return false;
         case EventKind.Expression:
         case EventKind.Statement:
-            switch (event.description.type.subkind) {
+            switch (event.description.subkind) {
                 case EventSubKind.Simple:
                     return l.pos === LabelPos.END;
-                case EventSubKind.VoidCall:
+                case EventSubKind.CallVoid:
                 case EventSubKind.ResultCall:
                     return l.pos === LabelPos.CALL;
                 default:
                     return false;
             }
+        default:
+            throw new Error("missing case " + event.description.kind);
     }
 }
 
@@ -120,7 +114,7 @@ const initialContext: ItemContext = {
 
 
 function propagateItemContext(event: EVENT, ctx: ItemContext): ItemContext {
-    switch (event.description.type.kind) {
+    switch (event.description.kind) {
         case EventKind.Flow:
             return { ident: ctx.ident + 1 };
         default:
@@ -129,10 +123,10 @@ function propagateItemContext(event: EVENT, ctx: ItemContext): ItemContext {
 }
 
 function aggregateItemState(event: EVENT, states: ItemState[]): ItemState {
-    switch (event.description.type.kind) {
+    switch (event.description.kind) {
         case EventKind.Update:
             const update: UPDATE = event as UPDATE
-            return { writes: writeIsDefined(update.data) ? [update.data] : [] };
+            return { writes: update.write ? [update.write] : [] };
 
         default:
             return {
@@ -147,37 +141,76 @@ function aggregateItemState(event: EVENT, states: ItemState[]): ItemState {
  **** Object UI
  ********/
 
-// function objectElement(obj: ObjectValue): UIElement {
-//     let nodes: Node[] = [...line([
-//         textEl(emojiUnicode(obj.id)),
-//         textEl(':'),
-//         textEl(shortClassName(obj.class))])]
-
-//     const model: any = undefined
-
-//     obj.fields
-//         .map(field => {
-//             const identifier = displayIdentifier(field.identifier, model)
-//             const value = displayValue(field.value, model)
-//             nodes.push(...line([
-//                 textEl(identationRepr(1)),
-//                 ...identifier,
-//                 textEl(" = "),
-//                 value
-//             ]))
-//         })
-//     return makeItem(nodes);
-// }
-
-/********
- **** utils
- ********/
-
-function shortClassName(name: string): string {
-    const parts = name.split(".");
-    return parts[parts.length - 1];
-
+type ObjectData = {
+    self: InstanceReference,
+    fields: Field[]
 }
+
+function objectHtml(obj : ObjectData):HTMLElement{
+    return box(PrintWizardStyle.TraceItem,[
+        box(PrintWizardStyle.Line, [referenceHtml(obj.self)]),
+        ...obj.fields.map(fieldHtml)
+    ])
+}
+
+type Field = {
+    identifier: FieldIdentifier,
+    value: Value
+}
+
+function fieldHtml(field : Field):HTMLElement{
+    return box(PrintWizardStyle.Line,[
+        textEl(field.identifier.name),
+        textEl(" = "),
+        displayValue(field.value, {inspect : (obj) => {}})
+    ])
+}
+
+class ObjectInspector implements DisplayObject {
+    html = box(PrintWizardStyle.Inspector, [])
+    displayedRefs: Set<string> = new Set()
+
+    constructor() {
+    }
+
+    keyOf(ref: InstanceReference): string {
+        return ref.pointer.toString() + '-' + ref.version.toString();
+    }
+
+    inspect(ref: InstanceReference) {
+        const k = this.keyOf(ref)
+        if (!this.displayedRefs.has(k)) {
+            this.displayedRefs.add(k)
+            this.html.appendChild(this.objectToHtml(ref))
+        }
+    }
+
+    objectToHtml(ref: InstanceReference): HTMLElement {
+        const key = this.keyOf(ref)
+      
+        const data = objectDataCache().data()
+        
+        switch (data.type) {
+            case 'failure':
+                return box(PrintWizardStyle.TraceItem, [
+                    box(PrintWizardStyle.TraceItem, [textEl(ref.className.className)]),
+                    box(PrintWizardStyle.TraceItem, [textEl('data not loaded')])
+                ])
+            case 'success':
+                const objData : undefined | ObjectData = data.payload[key]
+                if(objData===undefined){
+                    return box(PrintWizardStyle.TraceItem, [
+                        box(PrintWizardStyle.Line, [referenceHtml(ref)]),
+                        box(PrintWizardStyle.Line, [textEl('object not found')])
+                    ])
+                }else{
+                    return objectHtml(objData)
+                }
+        }
+    }
+}
+
+
 
 /*******************************************************
  **************** Html generation ******************
@@ -190,8 +223,7 @@ function itemHtml(
     ctx: ItemContext,
     node: NODEID,
     assings: Write[],
-    data: Data,
-    model: DisplayObject): HTMLElement {
+    event: EVENT): HTMLElement {
 
 
 
@@ -200,10 +232,20 @@ function itemHtml(
             return box(PrintWizardStyle.TraceItem, [textEl('unknown ' + node.line), brEl()])
 
         case 'NodeFormat':
+            const inspector = new ObjectInspector()
+
+
+
+            const result: Result | undefined = (event as any)['result']
+            const resultNode: Node[] = result ? [dataElement(result, inspector)] : []
+
+
+
             const nodes = [
+                inspector.html,
                 textBox(PrintWizardStyle.LineNumber, node.lineNumber.toString()),
                 textBox(PrintWizardStyle.Identation, identationRepr(ctx.ident)),
-                formatCode(node, assings.map(a => dataElement(a, model)), [dataElement(data, model)])
+                formatCode(node, assings.map(a => dataElement(a, inspector)), resultNode)
             ]
             return box(PrintWizardStyle.TraceItem, nodes)
 
@@ -231,26 +273,23 @@ function formatCode(node: NodeFormat, assings: Node[], result: Node[]): HTMLElem
 
 
 function dataElement(data: Data, model: DisplayObject): HTMLElement {
-    switch (data.type) {
-        case 'empty':
-            return empty();
-        case 'result':
-            if (resultIsDefined(data)) {
-                return box(PrintWizardStyle.Result, [textEl("\u27A1"), displayValue(data.value as Value, model)]);
-            } else {
-                return empty();
-            }
-        case 'write':
-            if (writeIsDefined(data)) {
-                return box(PrintWizardStyle.Write,
-                    [...displayIdentifier(data.varName as Identifier, model),
-                    textEl('='),
-                    displayValue(data.value as Value, model)
-                    ]
-                )
-            } else {
-                return empty();
-            }
+    switch (data.dataType) {
+        case DataType.Result:
+            return box(PrintWizardStyle.Result, [textEl("\u27A1"), displayValue(data.value as Value, model)]);
+        case DataType.Write:
+            return box(PrintWizardStyle.Write,
+                [...displayIdentifier(data.identifier, model),
+                textEl('='),
+                displayValue(data.value as Value, model)
+                ]
+            )
+        case DataType.InstanceRef:
+        case DataType.StaticReference:
+            throw new Error("not implemented");
+        case DataType.ArgsValues:
+        case DataType.FieldIdentifier:
+        case DataType.LocalIdentifier:
+            return empty()
     }
 }
 
@@ -262,32 +301,46 @@ function dataElement(data: Data, model: DisplayObject): HTMLElement {
 
 
 function displayIdentifier(ident: Identifier, model: DisplayObject): Node[] {
-    switch (ident.type) {
-        case 'LocalIdentifier':
-            return [textEl(ident.name)];
-        case 'Field':
-            return [displayValue(ident.obj, model), textEl("." + ident.name)];
-        case 'FiledInObject':
-            return [textEl(ident.name)];
-    }
+    switch (ident.dataType) {
+        case DataType.LocalIdentifier:
 
+            return [textEl(ident.name)];
+        case DataType.FieldIdentifier:
+            const owner = ident.owner
+            switch(owner.dataType){
+                case DataType.StaticReference:
+                    return [textEl(owner.className.className+'.'+ident.name)];
+                case DataType.InstanceRef:
+                    return [textEl(emojiUnicode(owner.pointer)+'.'+ident.name)];
+            }
+    }
 }
+
+/**************
+ ********* UI for reference
+ **************/
+
+function referenceHtml(reference : InstanceReference):Node{
+    if(Number.isNaN(reference.pointer))
+        debugger;
+    return textEl(reference.className.className+'$'+emojiUnicode(reference.pointer));
+}
+
 
 /**************
  ********* UI for Value
  **************/
 
-function displayValue(value: Value, model: DisplayObject): Node {
-    switch (value.type) {
-        case 'Literal':
-            return textEl(value.value.toString());
-        case 'Object':
+function displayValue(value: Value, actions: DisplayObject): Node {
+    switch (value.dataType) {
+        case DataType.Literal:
+            const repr = value.kind === "null" ? "null" : value.value.toString()
+            return textEl(repr);
+        case DataType.InstanceRef:
             return clickAction(
-                [textEl(emojiUnicode(value.id))],
-                () => { model.addObject(value) }
+                [referenceHtml(value)],
+                () => { actions.inspect(value) }
             );
-        case 'ObjectWithoutFields':
-            return textEl(emojiUnicode(value.id));
     }
 }
 
@@ -301,6 +354,7 @@ function displayValue(value: Value, model: DisplayObject): Node {
 function emojiUnicode(n: number): string {
     const nbEmojis = EmojiEnd - EmojiStart + 1;
     const codePoint = (n % nbEmojis) + EmojiStart;
+
     return String.fromCodePoint(codePoint);
 }
 
@@ -334,7 +388,10 @@ enum PrintWizardStyle {
     Code = 'code',
     Expression = 'expression',
     Result = 'result',
-    Write = 'write'
+    Write = 'write',
+    Inspector = 'inspector',
+    Button = 'button',
+    Line = 'Line'
 }
 
 /**************
@@ -343,7 +400,7 @@ enum PrintWizardStyle {
 
 
 function clickAction(elements: Node[], action: () => void): HTMLElement {
-    let span = spanEl(elements, Click_Style);
+    let span = spanEl(elements, PrintWizardStyle.Button);
     span.addEventListener('click', action)
     return span;
 }
