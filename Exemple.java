@@ -1,6 +1,4 @@
 public class Exemple {
-
-
     public static void main(String[] args) {
         Object x = null;
         int i = 0;
@@ -15,6 +13,7 @@ public class Exemple {
             }
             ++i;
         }
+
     }
 
     public static int foo(int a, int b) {

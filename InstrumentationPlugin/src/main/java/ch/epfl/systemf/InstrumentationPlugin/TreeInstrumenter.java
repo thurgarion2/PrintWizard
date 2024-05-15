@@ -185,7 +185,7 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitNewClass(JCTree.JCNewClass tree) {
         System.out.println("visitNewClass");
-        throw new UnsupportedOperationException();
+        //throw new UnsupportedOperationException();
     }
     @Override
     public void visitReference(JCTree.JCMemberReference tree) {
@@ -222,12 +222,6 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitTry(JCTree.JCTry tree) {
         System.out.println("visitTry");
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void visitTypeApply(JCTree.JCTypeApply tree) {
-        System.out.println("visitTypeApply");
         throw new UnsupportedOperationException();
     }
 

@@ -25,6 +25,7 @@ public class TreeHelper {
     public final Type boolP;
     public final Type objectP;
     public final SimpleClass evaluation;
+    public final JCTree.JCLiteral nullLiteral;
 
     public TreeHelper(TreeMaker mkTree, Names names, Symtab symb) {
         this.mkTree = mkTree;
@@ -37,6 +38,7 @@ public class TreeHelper {
         this.evaluation = new TreeHelper.SimpleClass("ch.epfl.systemf", "Logger$Evaluation");
         this.boolP = symb.booleanType;
         this.objectP = symb.objectType;
+        this.nullLiteral =  mkTree.Literal(TypeTag.BOT,null).setType(symb.botType);
     }
 
 

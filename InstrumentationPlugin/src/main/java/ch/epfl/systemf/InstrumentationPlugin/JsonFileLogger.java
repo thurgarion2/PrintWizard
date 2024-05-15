@@ -126,12 +126,12 @@ public class JsonFileLogger implements TraceLogger {
             throw new IllegalArgumentException();
 
         List<Symbol.VarSymbol> symbols = argsSymbols(call, currMethod);
-        Symbol.VarSymbol symbol = new Symbol.VarSymbol(0, helper.name("+++"), helper.intP, currMethod);
+        Symbol.VarSymbol notUsed = new Symbol.VarSymbol(0, helper.name("+++"), helper.intP, currMethod);
 
         NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
 
         JCTree.JCExpression logArgsAndCall = mkTree.LetExpr(
-                storeArgValues(symbols, call.args).append(mkTree.VarDef(symbol, callLogger.resultCall.call(id.identifier(), symbols))),
+                storeArgValues(symbols, call.args).append(mkTree.VarDef(notUsed, callLogger.resultCall.callStatic(id.identifier(), "", symbols))),
                 call
         ).setType(call.type);
         call.args = symbols.map(mkTree::Ident);
@@ -139,7 +139,7 @@ public class JsonFileLogger implements TraceLogger {
         return applyBeforeAfter(logArgsAndCall,
                 call.type,
                 () -> callLogger.resultCall.enter(id.identifier()),
-                s -> callLogger.resultCall.exit(id.identifier(), symbol),
+                s -> callLogger.resultCall.exit(id.identifier(), s),
                 currMethod);
     }
 
@@ -155,7 +155,7 @@ public class JsonFileLogger implements TraceLogger {
         List<Symbol.VarSymbol> symbols = argsSymbols(call, currMethod);
         JCTree.JCStatement logArgsAndCall = mkTree.Block(0,
                 storeArgValues(symbols, call.args)
-                        .append(mkTree.Exec(callLogger.voidCall.call(id.identifier(), symbols)))
+                        .append(mkTree.Exec(callLogger.voidCall.callStatic(id.identifier(), "", symbols)))
                         .append(mkTree.Exec(call))
         );
         call.args = symbols.map(mkTree::Ident);
@@ -307,7 +307,7 @@ public class JsonFileLogger implements TraceLogger {
 
         return applyAfter(expr,
                 exprType,
-                symbol -> callLogger.update.write(id.identifier(), name, symbol),
+                symbol -> callLogger.update.writeLocal(id.identifier(), name, symbol),
                 method);
     }
 

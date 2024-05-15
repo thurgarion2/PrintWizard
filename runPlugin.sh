@@ -3,7 +3,7 @@ javac -processorpath ./InstrumentationPlugin/target/classes \
   -g \
   -Xplugin:MyPlugin \
   -cp ./:./Logging/target/classes \
-  -J-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8800 \
+  -J-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:8800 \
   -J--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED \
   -J--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
   -J--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \

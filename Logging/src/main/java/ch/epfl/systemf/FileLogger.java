@@ -19,40 +19,43 @@ public class FileLogger {
      ********* Event
      **************/
     public static sealed abstract class Event {
-        public static int logLabel(EventType type, LabelPos pos, String nodeId, Data data) {
-            long eventId = switch (pos){
+        public static int logLabel(EventType type, LabelPos pos, String nodeId, List<Data> data) {
+            long eventId = switch (pos) {
                 case START -> enterEvent();
                 case END -> exitEvent();
                 case CALL -> currentEvent();
                 case UPDATE -> nextId();
             };
 
-            LabelDescription label = type.label(pos, eventId, nodeId, data);
+
             json.array();
-            label.toJsonArray().forEach(json::value);
+            pos.serializeToJson(type, new DynamicEventInfo(eventId, nodeId), data).forEach(json::value);
             json.endArray();
             return 0;
         }
 
     }
 
-    public record EventType(String type, String kind) {
-        public LabelDescription label(LabelPos pos, long eventId, String nodeId, Data data) {
-            return new LabelDescription(pos, eventId, nodeId, type, kind, data);
-        }
+    public record DynamicEventInfo(long eventId, String nodeId) {
     }
+
+    public record EventType(String type, String kind) {
+    }
+
+    /********
+     **** simple
+     ********/
 
     public static final class SimpleFlow extends Event {
         private static final EventType type = new EventType("flow", "simple");
 
 
-
         public static int enter(String nodeId) {
-            return Event.logLabel(type, LabelPos.START, nodeId, new Empty());
+            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
         }
 
         public static int exit(String nodeId) {
-            return Event.logLabel(type, LabelPos.END, nodeId, new Empty());
+            return Event.logLabel(type, LabelPos.END, nodeId, List.of());
         }
     }
 
@@ -60,54 +63,12 @@ public class FileLogger {
         private static final EventType type = new EventType("statement", "simple");
 
 
-
         public static int enter(String nodeId) {
-            return Event.logLabel(type, LabelPos.START, nodeId, new Empty());
+            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
         }
 
         public static int exit(String nodeId, Object result) {
-            return Event.logLabel(type, LabelPos.END, nodeId, new Result(result));
-        }
-    }
-
-    public static final class ResultCall extends Event {
-
-        public static Data data(LabelPos pos) {
-            return new Empty();
-        }
-
-        private static final EventType type = new EventType("statement", "resultCall");
-
-        public static int enter(String nodeId) {
-
-            return Event.logLabel(type, LabelPos.START, nodeId, new Empty());
-        }
-        public static int call(String nodeId, Object[]  argValues){
-            return Event.logLabel(type, LabelPos.CALL, nodeId, new Call(List.of(argValues)));
-        }
-
-        public static int exit(String nodeId, Object result) {
-            return Event.logLabel(type, LabelPos.END, nodeId, new Result(result));
-        }
-    }
-
-    public static final class VoidCall extends Event {
-
-        public static Data data(LabelPos pos) {
-            return new Empty();
-        }
-
-        private static final EventType type = new EventType("statement", "callVoid");
-
-        public static int enter(String nodeId) {
-            return Event.logLabel(type, LabelPos.START, nodeId, new Empty());
-        }
-        public static int call(String nodeId, Object[]  argValues){
-            return Event.logLabel(type, LabelPos.CALL, nodeId, new Call(List.of(argValues)));
-        }
-
-        public static int exit(String nodeId) {
-            return Event.logLabel(type, LabelPos.END, nodeId, new Empty());
+            return Event.logLabel(type, LabelPos.END, nodeId, List.of(new Result(result)));
         }
     }
 
@@ -115,13 +76,12 @@ public class FileLogger {
         private static final EventType type = new EventType("expression", "simple");
 
 
-
         public static int enter(String nodeId) {
-            return Event.logLabel(type, LabelPos.START, nodeId, new Empty());
+            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
         }
 
         public static int exit(String nodeId, Object result) {
-            return Event.logLabel(type, LabelPos.END, nodeId, new Result(result));
+            return Event.logLabel(type, LabelPos.END, nodeId, List.of(new Result(result)));
         }
     }
 
@@ -129,76 +89,60 @@ public class FileLogger {
         private static final EventType type = new EventType("update", "simple");
 
 
-
-        public static int write(String nodeId, String name, Object result) {
-            return Event.logLabel(type, LabelPos.UPDATE, nodeId, new Write(name, result));
+        public static int writeLocal(String nodeId, String name, Object result) {
+            return Event.logLabel(type, LabelPos.UPDATE, nodeId, List.of(
+                    new Write(new LocalIdentifier("shouldBeParent", name),
+                            result)));
         }
 
-    }
-
-    /**************
-     ********* LabelDescription
-     **************/
-
-    public record LabelDescription(LabelPos pos, long eventId, String nodeId, String kind, String type, Data data) {
-        List<Object> toJsonArray() {
-            return Stream.concat(
-                            Stream.of(pos.token, eventId, nodeId, kind, type),
-                            data.jsonArray().stream())
-                    .toList();
+        public static int writeField(String nodeId, Object owner, String name, Object result) {
+            return Event.logLabel(type, LabelPos.UPDATE, nodeId, List.of(
+                    new Write(new FieldIdentifier(Reference.write("", owner), name),
+                            result)));
         }
     }
 
-    /**************
-     ********* Data types
-     **************/
+    /********
+     **** calls
+     ********/
 
-    public sealed interface Data {
-        public List<Object> jsonArray();
-    }
+    public static final class ResultCall extends Event {
+        private static final EventType type = new EventType("statement", "resultCall");
 
-    static final class Empty implements Data {
-        @Override
-        public List<Object> jsonArray() {
-            return List.of();
+        public static int enter(String nodeId) {
+
+            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
+        }
+
+        //exactly one value of className and owner should be null
+        public static int call(String nodeId, String className, Object owner, Object[] argValues) {
+            Reference ownerRef = Reference.read(className, owner);
+            return Event.logLabel(type, LabelPos.CALL, nodeId, List.of(ownerRef, new ArgsValues(List.of(argValues))));
+        }
+
+        public static int exit(String nodeId, Object result) {
+            return Event.logLabel(type, LabelPos.END, nodeId, List.of(new Result(result)));
         }
     }
 
-    static final class Result implements Data {
-        private final Object value;
+    public static final class VoidCall extends Event {
+        private static final EventType type = new EventType("statement", "callVoid");
 
-        public Result(Object value) {
-            this.value = value;
+        public static int enter(String nodeId) {
+            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
         }
 
-        @Override
-        public List<Object> jsonArray() {
-            return List.of(valueRepr(value));
+        //exactly one value of className and owner should be null
+        public static int call(String nodeId, String className, Object owner, Object[] argValues) {
+            Reference ownerRef = Reference.read(className, owner);
+            return Event.logLabel(type, LabelPos.CALL, nodeId, List.of(ownerRef, new ArgsValues(List.of(argValues))));
         }
-    }
 
-    record Call(List<Object> argValues) implements Data {
-
-        @Override
-        public List<Object> jsonArray() {
-            return List.of(new JSONArray(argValues.stream().map(FileLogger::valueRepr).toList()));
+        public static int exit(String nodeId) {
+            return Event.logLabel(type, LabelPos.END, nodeId, List.of());
         }
     }
 
-    static final class Write implements Data {
-        final String name;
-        final Object value;
-
-        public Write(String name, Object value) {
-            this.name = name;
-            this.value = value;
-        }
-
-        @Override
-        public List<Object> jsonArray() {
-            return List.of(name, valueRepr(value));
-        }
-    }
 
     /**************
      ********* Label pos
@@ -216,15 +160,23 @@ public class FileLogger {
         LabelPos(String token) {
             this.token = token;
         }
+
+        public List<Object> serializeToJson(EventType type, DynamicEventInfo info, List<Data> data) {
+            return Stream.concat(
+                            Stream.of(token, info.eventId, info.nodeId, type.kind, type.type),
+                            data.stream().map(Data::json))
+                    .toList();
+        }
     }
 
     /*******************************************************
      **************** data structures ******************
      *******************************************************/
 
-    private record EventInfo(long eventId){}
-    private static Stack<EventInfo> context = new Stack<>();
+    private record EventInfo(long eventId) {
+    }
 
+    private static Stack<EventInfo> context = new Stack<>();
 
 
     private static long eventCounter = 0;
@@ -279,61 +231,212 @@ public class FileLogger {
     }
 
     /*******************************************************
-     **************** Log methods ******************
+     **************** Data ******************
      *******************************************************/
 
-    /**************
-     ********* value
-     **************/
+    public sealed interface Data {
+        Object json();
+    }
 
-    private static JSONObject valueRepr(Object value) {
+
+    record Result(Object value) implements Data {
+        @Override
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "dataType", "result",
+                    "result", valueRepr(value)));
+        }
+    }
+
+    record ArgsValues(List<Object> argValues) implements Data {
+
+        @Override
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "dataType", "argsValues",
+                    "values", new JSONArray(argValues.stream().map(FileLogger::valueRepr).toList())));
+
+        }
+    }
+
+    record Write(Identifier identifier, Object value) implements Data {
+        @Override
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "dataType", "write",
+                    "identifier", identifier.json(),
+                    "value", valueRepr(value)));
+        }
+    }
+
+    /*******************************************************
+     **************** Reference ******************
+     *******************************************************/
+
+
+    public sealed interface Reference extends Data {
+        //call if the field of a reference is only read
+        static Reference read(String fullClassName, Object ref) {
+            return reference(fullClassName, ref, 0);
+        }
+
+        //call if we write to the field of a reference
+        static Reference write(String fullClassName, Object ref) {
+            return reference(fullClassName, ref, 0);
+        }
+
+        private static Reference reference(String fullClassName, Object ref, int version) {
+            if ((fullClassName == null && ref == null) || (fullClassName != null && ref != null)) {
+                throw new IllegalArgumentException();
+            }
+
+            if (fullClassName != null) {
+                int index = fullClassName.lastIndexOf('.');
+                index = index == -1 ? 0 : index;
+                return new StaticReference(
+                        new ClassIdentifier(fullClassName.substring(0, index), fullClassName.substring(index)),
+                        version);
+            } else {
+                Class<?> clazz = ref.getClass();
+
+                return new InstanceReference(
+                        new ClassIdentifier(clazz.getPackageName(), clazz.getSimpleName()),
+                        System.identityHashCode(ref),
+                        version);
+            }
+        }
+    }
+
+    //should only be instanced from Reference.read or Reference.write
+    record StaticReference(ClassIdentifier clazz, int version) implements Reference {
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "dataType", "staticRef",
+                    "className", clazz.json(),
+                    "version", version));
+        }
+    }
+
+    //should only be instanced from Reference.read or Reference.write
+    record InstanceReference(ClassIdentifier clazz, int hashPointer, int version) implements Reference {
+
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "dataType", "instanceRef",
+                    "object", clazz.json(),
+                    "pointer", hashPointer,
+                    "version", version));
+        }
+    }
+
+    record ClassIdentifier(String packageName, String className) {
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "packageName", packageName,
+                    "className", className));
+        }
+    }
+
+    /*******************************************************
+     **************** Object Data ******************
+     *******************************************************/
+
+    //we should also have a mechanism to save class variables
+    static ObjectData saveObject(Object obj) {
+        Reference self = Reference.write("", obj);
+        List<Field> fs = fields(obj.getClass())
+                .map(f -> {
+                    try {
+                        return new Field(
+                                new FieldIdentifier(self, f.getName()),
+                                valueRepr(f.get(obj)));
+                    } catch (IllegalAccessException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .toList();
+        return new ObjectData(self, fs);
+    }
+
+    // store all data from an object
+    record ObjectData(Reference self, List<Field> fields) {
+    }
+
+    record Field(FieldIdentifier identifier, Object value) {
+    }
+
+    public static Stream<java.lang.reflect.Field> fields(Class<?> clazz) {
+        return Stream.empty();
+    }
+
+
+    /*******************************************************
+     **************** Identifier ******************
+     *******************************************************/
+
+    public sealed interface Identifier extends Data {
+    }
+
+    public record LocalIdentifier(String parentNodeId, String name) implements Identifier {
+        @Override
+        public Object json() {
+            return new JSONObject(Map.of(
+                    "dataType", "localIdentifier",
+                    "parent", parentNodeId,
+                    "name", name));
+        }
+    }
+
+    public record FieldIdentifier(Reference owner, String name) implements Identifier {
+        @Override
+        public Object json() {
+            return new JSONObject(Map.of(
+                    "dataType", "fieldIdentifier",
+                    "owner", owner.json(),
+                    "name", name));
+        }
+    }
+
+    /*******************************************************
+     **************** Value representation ******************
+     *******************************************************/
+
+    private static Object valueRepr(Object value) {
         return switch (value) {
-            case null -> {
-                yield simpleValue("null", "");
-            }
-            case Integer i -> {
-                yield simpleValue("int", i);
-            }
-            case Long l -> {
-                yield simpleValue("long", l);
-            }
-            case Boolean b -> {
-                yield simpleValue("bool", b);
-            }
-            default -> throw new UnsupportedOperationException();
+            case null -> simpleValue("null", "");
+            case Integer i -> simpleValue("int", i);
+            case Long l -> simpleValue("long", l);
+            case Boolean b -> simpleValue("bool", b);
+            case String s -> simpleValue("string", s);
+            case Character c -> simpleValue("char", c);
+            case Byte b -> simpleValue("byte", b);
+            case Short s -> simpleValue("short", s);
+            case Float f -> simpleValue("float", f);
+            case Double d -> simpleValue("double", d);
+            case Object obj -> Reference.read(null, obj).json();
         };
     }
 
     private static JSONObject simpleValue(String type, Object value) {
-        return new JSONObject(Map.of("type", type, "value", value));
+        return new JSONObject(Map.of("dataType", type, "value", value));
     }
 
+    /*******************************************************
+     **************** event id ******************
+     *******************************************************/
 
-    /**************
-     ********* identifier
-     **************/
-
-    private static JSONObject localIdentifier(String name) {
-        return new JSONObject(Map.of("type", "local", "name", name));
-    }
-
-
-    /**************
-     ********* event id
-     **************/
-
-    private static long enterEvent(){
+    private static long enterEvent() {
         long id = nextId();
         context.push(new EventInfo(id));
         return id;
     }
 
-    private static long currentEvent(){
+    private static long currentEvent() {
         EventInfo eventInfo = context.peek();
         return eventInfo.eventId;
     }
 
-    private static long exitEvent(){
+    private static long exitEvent() {
         EventInfo eventInfo = context.pop();
         return eventInfo.eventId;
     }

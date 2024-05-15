@@ -22,81 +22,106 @@ public class Logger {
 
 
     /**************
-     ********* events
+     ********* simple Event
      **************/
 
-    sealed interface Event {}
+    sealed interface Event {
+    }
 
-    final class SimpleFlow implements Event{
+    final class SimpleFlow implements Event {
         private static final TreeHelper.SimpleClass clazz = innerClass("SimpleFlow");
 
-        public JCTree.JCExpression enter(String nodeId){
-           return callSimpleEnter(clazz, nodeId);
+        public JCTree.JCExpression enter(String nodeId) {
+            return callSimpleEnter(clazz, nodeId);
         }
 
-        public JCTree.JCExpression exit(String nodeId){
+        public JCTree.JCExpression exit(String nodeId) {
             return callSimpleExit(clazz, nodeId);
         }
     }
 
-    final class SimpleStatement implements Event{
+    final class SimpleStatement implements Event {
         private static final TreeHelper.SimpleClass clazz = innerClass("SimpleStatement");
 
-        public JCTree.JCExpression enter(String nodeId){
+        public JCTree.JCExpression enter(String nodeId) {
             return callSimpleEnter(clazz, nodeId);
         }
 
-        public JCTree.JCExpression exit(String nodeId, Symbol result){
+        public JCTree.JCExpression exit(String nodeId, Symbol result) {
             return callExitResult(clazz, nodeId, result);
         }
 
     }
 
-    final class VoidCall implements Event{
-        private static final TreeHelper.SimpleClass clazz = innerClass("VoidCall");
-
-        public JCTree.JCExpression enter(String nodeId){
-            return callSimpleEnter(clazz, nodeId);
-        }
-
-        public JCTree.JCExpression call(String nodeId, List<? extends Symbol> argValues){
-            return callCall(clazz, nodeId, argValues);
-        }
-
-        public JCTree.JCExpression exit(String nodeId){
-            return callSimpleExit(clazz, nodeId);
-        }
-
-    }
-
-    final class ResultCall implements Event{
-        private static final TreeHelper.SimpleClass clazz = innerClass("ResultCall");
-
-        public JCTree.JCExpression enter(String nodeId){
-            return callSimpleEnter(clazz, nodeId);
-        }
-
-        public JCTree.JCExpression call(String nodeId, List<? extends Symbol> argValues){
-            return callCall(clazz, nodeId, argValues);
-        }
-
-        public JCTree.JCExpression exit(String nodeId, Symbol result){
-            return callExitResult(clazz, nodeId, result);
-        }
-
-    }
-
-    final class Update implements Event{
+    final class Update implements Event {
         private static final TreeHelper.SimpleClass clazz = innerClass("Update");
 
 
-        public JCTree.JCExpression write(String nodeId, String name, Symbol value){
+        public JCTree.JCExpression writeLocal(String nodeId, String name, Symbol value) {
             return helper.callStaticMethod(
                     clazz,
-                    "write",
+                    "writeLocal",
                     List.of(helper.string, helper.string, helper.objectP),
                     helper.intP,
                     List.of(mkTree.Literal(nodeId), mkTree.Literal(name), mkTree.Ident(value)));
+        }
+
+        public JCTree.JCExpression writeField(String nodeId, Symbol fieldOwner, String name, Symbol value) {
+            return helper.callStaticMethod(
+                    clazz,
+                    "writeField",
+                    List.of(helper.string, helper.objectP, helper.string, helper.objectP),
+                    helper.intP,
+                    List.of(mkTree.Literal(nodeId), mkTree.Ident(fieldOwner), mkTree.Literal(name), mkTree.Ident(value)));
+        }
+    }
+
+    /**************
+     ********* call events
+     **************/
+
+    abstract sealed class Call implements Event {
+        abstract TreeHelper.SimpleClass clazz();
+
+        public final JCTree.JCExpression enter(String nodeId) {
+            return callSimpleEnter(clazz(), nodeId);
+        }
+
+
+        public final JCTree.JCExpression callStatic(String nodeId, String className, List<? extends Symbol> argValues) {
+            return callStaticExp(clazz(), nodeId, className, argValues);
+        }
+
+        public final JCTree.JCExpression callInstance(String nodeId, Symbol objRef, List<? extends Symbol> argValues) {
+            return callInstanceExp(clazz(), nodeId, objRef, argValues);
+        }
+
+    }
+
+    final class ResultCall extends Call {
+        private static final TreeHelper.SimpleClass clazz = innerClass("ResultCall");
+
+
+        public JCTree.JCExpression exit(String nodeId, Symbol result) {
+            return callExitResult(clazz, nodeId, result);
+        }
+
+        @Override
+        TreeHelper.SimpleClass clazz() {
+            return clazz;
+        }
+    }
+
+    final class VoidCall extends Call {
+        private static final TreeHelper.SimpleClass clazz = innerClass("VoidCall");
+
+        public JCTree.JCExpression exit(String nodeId) {
+            return callSimpleExit(clazz, nodeId);
+        }
+
+        @Override
+        TreeHelper.SimpleClass clazz() {
+            return clazz;
         }
     }
 
@@ -105,21 +130,37 @@ public class Logger {
      ********* Helpers
      **************/
 
-    private static TreeHelper.SimpleClass innerClass(String name){
-        return new TreeHelper.SimpleClass("ch.epfl.systemf", "FileLogger$"+name);
+    private static TreeHelper.SimpleClass innerClass(String name) {
+        return new TreeHelper.SimpleClass("ch.epfl.systemf", "FileLogger$" + name);
     }
 
-    private JCTree.JCExpression callCall(TreeHelper.SimpleClass clazz, String nodeId, List<? extends Symbol> argValues){
+    private JCTree.JCExpression callInstanceExp(TreeHelper.SimpleClass clazz, String nodeId, Symbol instanceRef, List<? extends Symbol> argValues) {
         JCTree.JCExpression arr = helper.objectArray(argValues);
-        return helper.callStaticMethod(
-                clazz,
-                "call",
-                List.of(helper.string, arr.type),
-                helper.intP,
-                List.of(mkTree.Literal(nodeId), arr));
+        JCTree.JCExpression method = callMethod(clazz, arr);
+        return helper.callFun(
+                method,
+                List.of(mkTree.Literal(nodeId), mkTree.Literal(""), mkTree.Ident(instanceRef), arr)
+        );
     }
 
-    private JCTree.JCExpression callSimpleEnter(TreeHelper.SimpleClass clazz, String nodeId){
+    private JCTree.JCExpression callStaticExp(TreeHelper.SimpleClass clazz, String nodeId, String className, List<? extends Symbol> argValues) {
+        JCTree.JCExpression arr = helper.objectArray(argValues);
+        JCTree.JCExpression method = callMethod(clazz, arr);
+        return helper.callFun(
+                method,
+                List.of(mkTree.Literal(nodeId), mkTree.Literal(className), helper.nullLiteral, arr)
+        );
+
+    }
+
+    private JCTree.JCExpression callMethod(TreeHelper.SimpleClass clazz, JCTree.JCExpression arr) {
+        return helper.staticMethod(clazz,
+                "call",
+                List.of(helper.string, helper.string, helper.objectP, arr.type),
+                helper.intP);
+    }
+
+    private JCTree.JCExpression callSimpleEnter(TreeHelper.SimpleClass clazz, String nodeId) {
         return helper.callStaticMethod(
                 clazz,
                 "enter",
@@ -128,7 +169,7 @@ public class Logger {
                 List.of(mkTree.Literal(nodeId)));
     }
 
-    private JCTree.JCExpression callExitResult(TreeHelper.SimpleClass clazz, String nodeId, Symbol result){
+    private JCTree.JCExpression callExitResult(TreeHelper.SimpleClass clazz, String nodeId, Symbol result) {
 
         return helper.callStaticMethod(
                 clazz,
@@ -139,7 +180,7 @@ public class Logger {
     }
 
 
-    private JCTree.JCExpression callSimpleExit(TreeHelper.SimpleClass clazz, String nodeId){
+    private JCTree.JCExpression callSimpleExit(TreeHelper.SimpleClass clazz, String nodeId) {
 
         return helper.callStaticMethod(
                 clazz,
@@ -149,8 +190,8 @@ public class Logger {
                 List.of(mkTree.Literal(nodeId)));
     }
 
-    private  TreeHelper helper;
-    private  TreeMaker mkTree;
+    private TreeHelper helper;
+    private TreeMaker mkTree;
 
     public Logger(TreeHelper helper) {
         this.helper = helper;
