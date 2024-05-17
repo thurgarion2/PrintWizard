@@ -1,0 +1,64 @@
+#trace-display{
+    margin-left: 50px;
+}
+
+.line_number {
+    display: inline-block;
+    width: 3em;
+    text-align: end;
+}
+
+.trace_item {
+    display: block;
+    margin-top: 1px;
+    margin-bottom: 1px;
+}
+
+.line {
+    display: block;
+    margin-top: 1px;
+    margin-bottom: 1px;
+}
+
+.code {
+    display: inline;
+}
+
+.indentation {
+    display: inline;
+}
+
+.expression {
+    display: inline-block;
+    margin-left: 2px;
+    margin-right: 2px;
+    padding: 2px;
+    background-color: #CAC7C7;
+    border-radius: 3px;
+}
+
+.result {
+    display: inline-block;
+    margin-left: 2px;
+    margin-right: 2px;
+    padding: 2px;
+    background-color: #FF0000;
+    border-radius: 3px;
+}
+
+.write {
+    display: inline-block;
+    margin-left: 2px;
+    margin-right: 2px;
+    padding: 2px;
+    background-color: #00A79F;
+    border-radius: 3px;
+}
+
+.inspector {
+    float: right;
+}
+
+.button {
+    background-color: green;
+}
