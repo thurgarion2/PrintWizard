@@ -13,7 +13,8 @@ import {
     DataType,
     Data,
     Write,
-    FieldIdentifier
+    FieldIdentifier,
+    valueFromJson
 } from './event';
 import { objectDataCache } from './fetch';
 import { ScopedLabel } from './treeTransforms';
@@ -159,10 +160,11 @@ type Field = {
 }
 
 function fieldHtml(field : Field):HTMLElement{
+    
     return box(PrintWizardStyle.Line,[
         textEl(field.identifier.name),
         textEl(" = "),
-        displayValue(field.value, {inspect : (obj) => {}})
+        displayValue(valueFromJson(field.value), {inspect : (obj) => {}})
     ])
 }
 
@@ -204,6 +206,7 @@ class ObjectInspector implements DisplayObject {
                         box(PrintWizardStyle.Line, [textEl('object not found')])
                     ])
                 }else{
+                    
                     return objectHtml(objData)
                 }
         }

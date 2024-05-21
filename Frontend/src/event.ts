@@ -23,7 +23,8 @@ export {
     EventSubKind,
     InstanceReference,
     parseRawLabels,
-    parseLabels
+    parseLabels,
+    valueFromJson
 }
 
 import { sourceCodeCache } from "./fetch"

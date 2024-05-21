@@ -319,9 +319,12 @@ public class FileLogger {
             List<Field> fs = fields(obj.getClass())
                     .map(f -> {
                         try {
+                            f.setAccessible(true);
+                            Object value = f.get(obj);
+                            f.setAccessible(false);
                             return new Field(
                                     new FieldIdentifier(ref, f.getName()),
-                                    valueRepr(f.get(obj)));
+                                    value);
                         } catch (IllegalAccessException e) {
                             throw new RuntimeException(e);
                         }
@@ -348,8 +351,13 @@ public class FileLogger {
             }
         }
 
+        //TODO return field from interface but who use static interface fields
         private static Stream<java.lang.reflect.Field> fields(Class<?> clazz) {
-            return Stream.empty();
+            if(clazz==null){
+                return Stream.empty();
+            }else{
+                return Stream.concat(Arrays.stream(clazz.getDeclaredFields()), fields(clazz.getSuperclass()));
+            }
         }
 
 

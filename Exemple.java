@@ -17,6 +17,7 @@ public class Exemple {
     }
 
     public static int foo(int a, int b) {
+
         return a+b;
     }
 }
