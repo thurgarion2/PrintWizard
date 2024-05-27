@@ -1,4 +1,6 @@
-export {initCache, sourceCodeCache, traceCache, objectDataCache}
+import { SourceFormatDescription, parseSourceFormatDescription } from "./event"
+
+export { initCache, sourceCodeCache, traceCache, objectDataCache }
 
 
 /*******************************************************
@@ -7,15 +9,15 @@ export {initCache, sourceCodeCache, traceCache, objectDataCache}
 
 type Result<A> = Success<A> | Failure
 type Success<A> = {
-    type : 'success',
-    payload : A
+    type: 'success',
+    payload: A
 }
 type Failure = {
-    type : 'failure'
+    type: 'failure'
 }
 
-interface DataCache<A>{
-    data : () => Result<A>
+interface DataCache<A> {
+    data: () => Result<A>
 }
 
 
@@ -28,30 +30,30 @@ interface DataCache<A>{
  ********* state
  **************/
 
-let sourceCode : DataCache<any> 
-let trace : DataCache<any>
-let objectData : DataCache<any>
+let sourceCode: DataCache<SourceFormatDescription>
+let trace: DataCache<any>
+let objectData: DataCache<any>
 
 /**************
  ********* Functions
  **************/
 
-async function initCache(){
+async function initCache() {
     sourceCode = await loadAllData(fetchSourceFormat)
     trace = await loadAllData(fetchEventTrace)
     objectData = await loadAllData(fetchSourceObjectData)
 }
 
 
-function sourceCodeCache() : DataCache<any> {
+function sourceCodeCache(): DataCache<SourceFormatDescription> {
     return sourceCode
 }
 
-function traceCache() : DataCache<any> {
+function traceCache(): DataCache<any> {
     return trace
 }
 
-function objectDataCache() : DataCache<any> {
+function objectDataCache(): DataCache<any> {
     return objectData
 }
 
@@ -64,17 +66,13 @@ function objectDataCache() : DataCache<any> {
  ********* different cache types
  **************/
 
-async function loadAllData<A>(load : () => Promise<A>):Promise<DataCache<A>>{
-    try{
-        const payload = await load()
-        return {
-            data : () => success(payload)
-        }
-    }catch(error){
-        return {
-            data : () => failure()
-        }
+async function loadAllData<A>(load: () => Promise<A>): Promise<DataCache<A>> {
+
+    const payload = await load()
+    return {
+        data: () => success(payload)
     }
+
 }
 
 /**************
@@ -93,6 +91,10 @@ function fetchSourceFormat() {
         .then(response => {
             return response.json()
         })
+        .then(json => {
+            return parseSourceFormatDescription(json)
+        })
+
 }
 
 function fetchSourceObjectData() {
@@ -106,16 +108,16 @@ function fetchSourceObjectData() {
  ********* constructors
  **************/
 
-function success<A>(data : A) : Success<A>{
+function success<A>(data: A): Success<A> {
     return {
-        type : 'success',
-        payload : data
+        type: 'success',
+        payload: data
     }
 }
 
-function failure() : Failure{
+function failure(): Failure {
     return {
-        type : 'failure'
+        type: 'failure'
     }
 }
 

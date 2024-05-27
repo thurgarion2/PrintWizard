@@ -3,8 +3,7 @@ import {
     InstanceReference,
     Value,
     Identifier,
-    NODEID,
-    NodeFormat,
+    NodeSourceFormat,
     UPDATE,
     LabelPos,
     Result,
@@ -13,8 +12,11 @@ import {
     DataType,
     Data,
     Write,
+    Token,
     FieldIdentifier,
-    valueFromJson
+    PresentInSourceCode,
+    valueFromJson,
+    ArgsValues
 } from './event';
 import { objectDataCache } from './fetch';
 import { ScopedLabel } from './treeTransforms';
@@ -138,17 +140,132 @@ function aggregateItemState(event: EVENT, states: ItemState[]): ItemState {
     }
 }
 
+
+/*******************************************************
+ **************** HTML ******************
+ *******************************************************/
+
+/**************
+ ********* NodeSourceFormat
+ **************/
+
 /********
- **** Object UI
- ********/
+**** transformation
+********/
+
+const SPACES_PER_IDENT_LEVEL = 6
+
+
+function nodeSythaxToHtml(
+    synthax: PresentInSourceCode,
+    result: Result | undefined,
+    assigns: Write[],
+    indentLevel: number,
+    inspector: DisplayObject,
+    childrenValues: ArgsValues | undefined): HTMLElement {
+
+
+
+    const resultHtml = result === undefined ? [] : [dataElement(result, inspector)]
+    const assignsHtml = assigns.map(assign => assignToHtml(assign, inspector))
+
+    console.assert(childrenValues === undefined || childrenValues.values.length === synthax.children.length)
+
+    let code: Node[] = []
+
+    code.push(...tokenToHtml(synthax.prefix, (index: number) => undefined))
+
+
+    code.push(box(
+        PrintWizardStyle.Expression,
+        synthax.expression.tokens.flatMap(token => tokenToHtml(token, argumentValue(childrenValues, inspector))
+        )))
+    code.push(...[...resultHtml, ...assignsHtml])
+    code.push(...tokenToHtml(synthax.suffix, (index: number) => undefined))
+
+
+    return box(PrintWizardStyle.Code, [
+        box(PrintWizardStyle.LineNumbers,
+            lineRange(synthax.startLine, synthax.endLine + 1)
+                .map(l => textBox(PrintWizardStyle.LineNumber, l.toString()))),
+        widthBox(SPACES_PER_IDENT_LEVEL * indentLevel),
+        defaultBox(code)
+    ])
+}
+
+/********
+**** api
+********/
+
+
+
+/********
+**** helper
+********/
+
+function argumentValue(childrenValues: ArgsValues | undefined, inspector: DisplayObject): (index: number) => Node[] | undefined {
+    if(childrenValues === undefined){
+        return (index : number) => undefined
+    }else{
+        return (index : number) => {
+            const value = childrenValues.values[index]
+            return value === undefined ? undefined : [textEl(':'), displayValue(value, inspector)];
+        }
+    }
+
+}
+
+//inclusive, inc
+function lineRange(startLine: number, endLine: number): number[] {
+    let range = []
+    for (let i = startLine; i < endLine; ++i) {
+        range.push(i)
+    }
+    return range;
+}
+
+
+function tokenToHtml(token: Token, childToNode: (index: number) => Node[] | undefined): Node[] {
+    switch (token.kind) {
+        case 'LineStart':
+            return [brEl()]
+        case 'Text':
+            return [textEl(token.text)]
+        case 'Child':
+            const childNode = childToNode(token.childIndex)
+          
+            return [textEl(token.text), ... (childNode === undefined ? [empty()] : childNode)]
+    }
+}
+
+
+function resultToHtml(result: Result, inspector: DisplayObject): HTMLElement {
+    return box(
+        PrintWizardStyle.Result,
+        [textEl("\u27A1"), displayValue(result.value as Value, inspector)]
+    );
+}
+
+function assignToHtml(assign: Write, inspector: DisplayObject): HTMLElement {
+    return box(PrintWizardStyle.Write,
+        [...displayIdentifier(assign.identifier, inspector),
+        textEl('='),
+        displayValue(assign.value as Value, inspector)
+        ]
+    )
+}
+
+/**************
+ ********* Object
+ **************/
 
 type ObjectData = {
     self: InstanceReference,
     fields: Field[]
 }
 
-function objectHtml(obj : ObjectData):HTMLElement{
-    return box(PrintWizardStyle.TraceItem,[
+function objectHtml(obj: ObjectData): HTMLElement {
+    return box(PrintWizardStyle.TraceItem, [
         box(PrintWizardStyle.Line, [referenceHtml(obj.self)]),
         ...obj.fields.map(fieldHtml)
     ])
@@ -159,12 +276,12 @@ type Field = {
     value: Value
 }
 
-function fieldHtml(field : Field):HTMLElement{
-    
-    return box(PrintWizardStyle.Line,[
+function fieldHtml(field: Field): HTMLElement {
+
+    return box(PrintWizardStyle.Line, [
         textEl(field.identifier.name),
         textEl(" = "),
-        displayValue(valueFromJson(field.value), {inspect : (obj) => {}})
+        displayValue(valueFromJson(field.value), { inspect: (obj) => { } })
     ])
 }
 
@@ -189,9 +306,9 @@ class ObjectInspector implements DisplayObject {
 
     objectToHtml(ref: InstanceReference): HTMLElement {
         const key = this.keyOf(ref)
-      
+
         const data = objectDataCache().data()
-        
+
         switch (data.type) {
             case 'failure':
                 return box(PrintWizardStyle.TraceItem, [
@@ -199,14 +316,14 @@ class ObjectInspector implements DisplayObject {
                     box(PrintWizardStyle.TraceItem, [textEl('data not loaded')])
                 ])
             case 'success':
-                const objData : undefined | ObjectData = data.payload[key]
-                if(objData===undefined){
+                const objData: undefined | ObjectData = data.payload[key]
+                if (objData === undefined) {
                     return box(PrintWizardStyle.TraceItem, [
                         box(PrintWizardStyle.Line, [referenceHtml(ref)]),
                         box(PrintWizardStyle.Line, [textEl('object not found')])
                     ])
-                }else{
-                    
+                } else {
+
                     return objectHtml(objData)
                 }
         }
@@ -214,43 +331,38 @@ class ObjectInspector implements DisplayObject {
 }
 
 
-
-/*******************************************************
- **************** Html generation ******************
- *******************************************************/
+/**************
+ ********* item
+ **************/
 
 
 
 
 function itemHtml(
     ctx: ItemContext,
-    node: NODEID,
+    node: NodeSourceFormat,
     assings: Write[],
     event: EVENT): HTMLElement {
 
 
+    switch (node.kind) {
+        case 'absent':
+            return empty()
 
-    switch (node.type) {
-        case 'UnknownFormat':
-            return box(PrintWizardStyle.TraceItem, [textEl('unknown ' + node.line), brEl()])
-
-        case 'NodeFormat':
+        case 'presentInSourceCode':
             const inspector = new ObjectInspector()
 
-
-
-            const result: Result | undefined = (event as any)['result']
-            const resultNode: Node[] = result ? [dataElement(result, inspector)] : []
-
-
-
-            const nodes = [
+            return box(PrintWizardStyle.TraceItem, [
                 inspector.html,
-                textBox(PrintWizardStyle.LineNumber, node.lineNumber.toString()),
-                textBox(PrintWizardStyle.Identation, identationRepr(ctx.ident)),
-                formatCode(node, assings.map(a => dataElement(a, inspector)), resultNode)
-            ]
-            return box(PrintWizardStyle.TraceItem, nodes)
+                nodeSythaxToHtml(
+                    node,
+                    (event as any).result,
+                    assings,
+                    ctx.ident,
+                    inspector,
+                    (event as any).argsValues
+                )
+            ])
 
     }
 }
@@ -258,21 +370,6 @@ function itemHtml(
 /********
  **** utils
  ********/
-
-
-function formatCode(node: NodeFormat, assings: Node[], result: Node[]): HTMLElement {
-    const line = node.line;
-    const before = line.slice(0, node.startCol);
-    const evalutedExpression = line.slice(node.startCol, node.endCol)
-    const after = line.slice(node.endCol)
-    return box(PrintWizardStyle.Code, [
-        textEl(before),
-        textBox(PrintWizardStyle.Expression, evalutedExpression),
-        ...result,
-        ...assings,
-        textEl(after)
-    ]);
-}
 
 
 function dataElement(data: Data, model: DisplayObject): HTMLElement {
@@ -310,11 +407,11 @@ function displayIdentifier(ident: Identifier, model: DisplayObject): Node[] {
             return [textEl(ident.name)];
         case DataType.FieldIdentifier:
             const owner = ident.owner
-            switch(owner.dataType){
+            switch (owner.dataType) {
                 case DataType.StaticReference:
-                    return [textEl(owner.className.className+'.'+ident.name)];
+                    return [textEl(owner.className.className + '.' + ident.name)];
                 case DataType.InstanceRef:
-                    return [textEl(emojiUnicode(owner.pointer)+'.'+ident.name)];
+                    return [textEl(emojiUnicode(owner.pointer) + '.' + ident.name)];
             }
     }
 }
@@ -323,10 +420,10 @@ function displayIdentifier(ident: Identifier, model: DisplayObject): Node[] {
  ********* UI for reference
  **************/
 
-function referenceHtml(reference : InstanceReference):Node{
-    if(Number.isNaN(reference.pointer))
+function referenceHtml(reference: InstanceReference): Node {
+    if (Number.isNaN(reference.pointer))
         debugger;
-    return textEl(reference.className.className+'$'+emojiUnicode(reference.pointer));
+    return textEl(reference.className.className + '$' + emojiUnicode(reference.pointer));
 }
 
 
@@ -362,19 +459,6 @@ function emojiUnicode(n: number): string {
 }
 
 
-let storeIdent: Map<number, string> = new Map<number, string>([
-    [0, ""]
-]);
-
-function identationRepr(ident: number): string {
-    console.assert(ident >= 0)
-
-    if (!storeIdent.has(ident)) {
-        storeIdent.set(ident, SPACE.repeat(6) + identationRepr(ident - 1));
-    }
-    const res = storeIdent.get(ident);
-    return res === undefined ? '' : res;
-}
 
 /*******************************************************
  **************** UI primitive  ******************
@@ -385,6 +469,7 @@ function identationRepr(ident: number): string {
  **************/
 
 enum PrintWizardStyle {
+    LineNumbers = 'line_numbers',
     LineNumber = 'line_number',
     TraceItem = 'trace_item',
     Identation = 'indentation',
@@ -394,7 +479,7 @@ enum PrintWizardStyle {
     Write = 'write',
     Inspector = 'inspector',
     Button = 'button',
-    Line = 'Line'
+    Line = 'line'
 }
 
 /**************
@@ -434,6 +519,20 @@ function box(style: PrintWizardStyle, elements: Node[]) {
     elements.map(child => div.appendChild(child));
     return div;
 }
+
+function defaultBox(elements: Node[]) {
+    let div = document.createElement("div");
+    elements.map(child => div.appendChild(child));
+    return div;
+}
+
+function widthBox(width: number) {
+    let div = document.createElement("div");
+    div.style.visibility = 'hidden';
+    div.innerText = '-'.repeat(width)
+    return div;
+}
+
 
 
 function brEl(): HTMLElement {

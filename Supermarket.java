@@ -42,12 +42,16 @@ public class Supermarket {
         }
 
         public MyList<A> add(A elem){
-            return new MyList<>(elem, this);
+            return new MyList<>(
+                    elem,
+                    this);
         }
 
 
         public static <A> MyList<A> nil(){
-            return new MyList<>(null, null);
+            return new MyList<>(
+                    null,
+                    null);
         }
     }
 

@@ -8,31 +8,38 @@
     text-align: end;
 }
 
+.line_numbers {
+    display: flex;
+    flex-direction: column;
+}
+
+.line {
+    display: block;
+}
+
 .trace_item {
     display: block;
     margin-top: 1px;
     margin-bottom: 1px;
 }
 
-.line {
-    display: block;
-    margin-top: 1px;
-    margin-bottom: 1px;
-}
+
 
 .code {
-    display: inline;
+    display: flex;
+    flex-direction: row;
+
 }
 
 .indentation {
     display: inline;
+    background-color: white;
 }
 
 .expression {
-    display: inline-block;
+    display: inline;
     margin-left: 2px;
     margin-right: 2px;
-    padding: 2px;
     background-color: #CAC7C7;
     border-radius: 3px;
 }

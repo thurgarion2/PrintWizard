@@ -21,11 +21,15 @@ Promise.all([initCache()])
         const rawLabels = parseRawLabels(rawTrace)
         const labels = parseLabels(rawLabels)
        
+        
+
         const labelsWithContext = scopedTreeTransform(
             labels,
             initialContext,
             aggregateItemState,
             propagateItemContext);
+        
+        
        
         const labelsItems = 
             labelsWithContext

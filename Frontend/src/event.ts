@@ -1,14 +1,17 @@
 export {
     EventId as EVENTID,
     EventType,
-    NODEID,
+    NodeSourceFormat,
     EVENT,
     STATMENT,
     EXPRESSION,
     FLOW,
     UPDATE,
     Value,
-    NodeFormat,
+    SourceFormatDescription,
+    PresentInSourceCode,
+    Token,
+    parseSourceFormatDescription,
     Identifier,
     Data,
     Write,
@@ -20,11 +23,13 @@ export {
     Result,
     EventKind,
     DataType,
+    ArgsValues,
     EventSubKind,
     InstanceReference,
     parseRawLabels,
     parseLabels,
-    valueFromJson
+    valueFromJson,
+    findNodeSynthax
 }
 
 import { sourceCodeCache } from "./fetch"
@@ -115,7 +120,7 @@ function makeEvent(label: RawLabel): EVENT {
  **************/
 type InstanceInfo = {
     eventId: EventId,
-    nodeId: NODEID
+    nodeId: NodeSourceFormat
 }
 
 type EventId = { id: number }
@@ -130,7 +135,7 @@ function instanceInfoFromJson(json: any[]): InstanceInfo {
 
     return {
         eventId: eventId,
-        nodeId: makeNodeId(nodeId)
+        nodeId: findNodeSynthax(nodeId)
     }
 
 }
@@ -334,7 +339,7 @@ function labelSchema(pos: LabelPos, data: [string, DataType[]][]): LabelSchema {
             for (let i = 0; i < data.length; ++i) {
                 const [field, dataTypes] = data[i]
                 const d = lData[i] as any
-                if (!dataTypes.includes(d.dataType)){
+                if (!dataTypes.includes(d.dataType)) {
                     unableToParse(label.data)
                 }
                 (event as any)[field] = d
@@ -409,50 +414,223 @@ function parseRawLabel(json: any): RawLabel {
  *******************************************************/
 
 
-type NODEID = NodeFormat | UnknownFormat
 
-type NodeFormat = {
-    type: "NodeFormat",
-    lineNumber: number,
-    line: string,
-    startCol: number,
-    endCol: number
+type NodeSourceFormat = PresentInSourceCode | AbsentFromSourceCode
+
+/**************
+ ********* types
+ **************/
+
+type SourceFormatDescription = {
+    sourceFile: SourceFile,
+    syntaxNodes: any
 }
 
-type UnknownFormat = {
-    type: "UnknownFormat",
-    line: string
+/********
+**** SourceFile definition
+********/
+
+type SourceFile = {
+    packageName: string,
+    fileName: string
 }
 
-const makeNodeId = function (id: string): NODEID {
-    const result = sourceCodeCache().data()
+/********
+**** Present In Source Code definition
+********/
 
-    switch (result.type) {
-        case 'failure':
-            return {
-                type: "UnknownFormat",
-                line: id
-            };
+type PresentInSourceCode = {
+    tokens: Token[],
+    children: string[],
+    sourceFile: SourceFile,
+    identifier: string,
+    startLine: number,
+    endLine: number,
+    expression: Expression,
+    prefix: Text,
+    suffix: Text,
+    kind: "presentInSourceCode"
+}
+
+/********
+**** Token definition
+********/
+
+type Token = Text | Child | LineStart
+
+type Text = {
+    kind: "Text",
+    text: string
+}
+
+type Expression = {
+    kind: "expression",
+    tokens: Token[]
+}
+
+
+type Child = {
+    kind: "Child",
+    childIndex: number,
+    text: string
+}
+
+type LineStart = {
+    kind: "LineStart",
+    lineNumber: number
+}
+
+/********
+**** Absent From SourceCode definition
+********/
+
+
+type AbsentFromSourceCode = {
+    kind: "absent",
+    identifier: string
+}
+
+/**************
+ ********* schema
+ **************/
+
+/********
+**** schema defintions
+********/
+
+// we validate that the types have the right form
+
+
+const SourceFileSchema = jsonSchemaBuilder()
+    .stringField("packageName")
+    .stringField("fileName")
+
+const TextSchema = jsonSchemaBuilder()
+    .constField("kind", "Text")
+    .stringField("text")
+
+
+const ChildSchema = jsonSchemaBuilder()
+    .constField("kind", "Child")
+    .numberField("childIndex")
+    .stringField("text")
+
+const LineStartSchema = jsonSchemaBuilder()
+    .constField("kind", "LineStart")
+
+const AbsentFromSourceCodeSchema = jsonSchemaBuilder()
+    .constField("kind", "absent")
+    .stringField("identifier")
+
+const TokenSchema = sumJsonSchema([TextSchema, ChildSchema, LineStartSchema])
+
+const ExpressionSchema = jsonSchemaBuilder()
+    .constField("kind", "expression")
+    .array("tokens", TokenSchema)
+
+
+const PresentInSourceCodeSchema = jsonSchemaBuilder()
+    .array("tokens", TokenSchema)
+    .array("children", { valid: (s: any) => typeof s === 'string' })
+    .objectField("sourceFile", SourceFileSchema)
+    .objectField("expression", ExpressionSchema)
+    .objectField("prefix", TextSchema)
+    .objectField("suffix", TextSchema)
+    .stringField("identifier")
+    .constField("kind", "presentInSourceCode")
+
+const NodeSourceFormatSchema = sumJsonSchema([PresentInSourceCodeSchema, AbsentFromSourceCodeSchema])
+
+const SourceFormatDescriptionSchema = jsonSchemaBuilder()
+    .objectField("sourceFile", SourceFileSchema)
+    .objectField("syntaxNodes", {
+        valid: (m: any) => {
+            return Object.values(m).every(v => NodeSourceFormatSchema.valid(v))
+        }
+    }
+
+    )
+
+
+/********
+****  Json schema
+********/
+
+interface JsonSchema {
+    valid: (json: any) => boolean
+}
+
+interface JsonSchemaBuilder {
+    numberField: (field: string) => JsonSchemaBuilder,
+    constField: (field: string, const_: string) => JsonSchemaBuilder,
+    array: (field: string, schema: JsonSchema) => JsonSchemaBuilder,
+    stringField: (field: string) => JsonSchemaBuilder,
+    objectField: (field: string, schema: JsonSchema) => JsonSchemaBuilder,
+    valid: (json: any) => boolean
+
+}
+//all sum type have a kind field we could use that to dispatch it efficently
+function sumJsonSchema(schemas: JsonSchema[]): JsonSchema {
+    return {
+        valid: (json: any) => schemas.some(s => s.valid(json))
+    }
+}
+
+
+//not immutable
+function jsonSchemaBuilder(): JsonSchemaBuilder {
+
+    function helper(fields: Map<string, (value: any) => boolean>): JsonSchemaBuilder {
+        return {
+            numberField: (field: string) => helper(fields.set(field, (value: any) => typeof value === "number")),
+            stringField: (field: string) => helper(fields.set(field, (value: any) => typeof value === "string")),
+            objectField: (field: string, schema: JsonSchema) => helper(fields.set(field, (value: any) => schema.valid(value))),
+            constField: (field: string, const_: string) => helper(fields.set(field, (value: any) => value === const_)),
+            array: (field: string, schema: JsonSchema) => helper(fields.set(field, (value: any) => value.every((v: any) => schema.valid(v)))),
+            valid: (json: any) => {
+                return Object.keys(json).every(field =>
+                    fields.has(field) && (fields.get(field) as any)(json[field]))
+            }
+        }
+    }
+
+    return helper(new Map())
+}
+
+/********
+****  extract Node Source Format
+********/
+
+function findNodeSynthax(nodeId: any): NodeSourceFormat {
+    if (typeof (nodeId) !== 'string')
+        throw new Error('nodeId should be a string')
+
+    const data = sourceCodeCache().data()
+    switch (data.type) {
+        case 'failure': return {
+            kind: "absent",
+            identifier: nodeId
+        }
         case 'success':
-            const format = result.payload
-            const nodeInfo: any = format[id]
-            if (nodeInfo!==undefined && nodeInfo['info']===undefined) {
-                
-                return {
-                    type: "NodeFormat",
-                    lineNumber: nodeInfo['lineNumber'],
-                    line: nodeInfo['line'],
-                    startCol: nodeInfo['startCol'],
-                    endCol: nodeInfo['endCol']
-                }
+            const nodes = data.payload.syntaxNodes
+
+            if (nodeId in nodes) {
+                return nodes[nodeId] as any
             } else {
                 return {
-                    type: "UnknownFormat",
-                    line: id
-                };
+                    kind: "absent",
+                    identifier: nodeId
+                }
             }
     }
 
+}
+
+
+function parseSourceFormatDescription(json: any): SourceFormatDescription {
+    if (!SourceFormatDescriptionSchema.valid(json))
+        console.log("invalide source code format file")
+    return json;
 }
 
 /*******************************************************
@@ -570,7 +748,7 @@ type Reference = InstanceReference | StaticReference
 type InstanceReference = {
     dataType: DataType.InstanceRef,
     className: ClassIdentifier,
-    pointer : number,
+    pointer: number,
     version: number
 }
 

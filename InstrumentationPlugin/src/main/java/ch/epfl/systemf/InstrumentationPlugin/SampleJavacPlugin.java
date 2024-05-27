@@ -37,9 +37,9 @@ public class SampleJavacPlugin implements Plugin {
             public void finished(TaskEvent e) {
                 if(e.getKind()== TaskEvent.Kind.ANALYZE){
                     TreeHelper instr = new TreeHelper(mkTree,names, symb);
-                    NodeIdFactory makeNodeId = new NodeIdFactory((JCTree.JCCompilationUnit)e.getCompilationUnit());
+                    SourceFormat makeNodeId = new SourceFormat((JCTree.JCCompilationUnit)e.getCompilationUnit());
                     TraceLogger traceLogger = new JsonFileLogger(instr, makeNodeId);
-                    TreeInstrumenter t = new TreeInstrumenter(traceLogger, instr);
+                    TreeInstrumenter t = new TreeInstrumenter(traceLogger, instr, makeNodeId);
                     t.translate((JCTree.JCCompilationUnit)e.getCompilationUnit());
                     makeNodeId.end();
                 }

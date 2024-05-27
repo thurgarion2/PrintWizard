@@ -11,12 +11,14 @@ public class TreeInstrumenter extends TreeTranslator {
     private final TraceLogger traceLogger;
     private final TreeHelper helper;
     private Symbol.MethodSymbol currentMethod = null;
+    private final SourceFormat makeNodeId;
 
 
-    public TreeInstrumenter(TraceLogger traceLogger, TreeHelper helper) {
+    public TreeInstrumenter(TraceLogger traceLogger, TreeHelper helper, SourceFormat makeNodeId) {
         super();
         this.traceLogger = traceLogger;
         this.helper = helper;
+        this.makeNodeId = makeNodeId;
     }
 
     /*******************************************************
@@ -37,6 +39,7 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitApply(JCTree.JCMethodInvocation tree) {
+        makeNodeId.nodeId(tree, tree.args);
         super.visitApply(tree);
         this.result = traceLogger.logCallStatement(
                 (JCTree.JCMethodInvocation) this.result,
@@ -297,6 +300,7 @@ public class TreeInstrumenter extends TreeTranslator {
     private JCTree.JCExpression visitStatement(JCTree.JCExpression statement) {
         return switch (statement) {
             case JCTree.JCMethodInvocation call -> {
+                makeNodeId.nodeId(call, call.args);
                 super.visitApply(call);
                 yield traceLogger.logCallStatement(
                         (JCTree.JCMethodInvocation) this.result,

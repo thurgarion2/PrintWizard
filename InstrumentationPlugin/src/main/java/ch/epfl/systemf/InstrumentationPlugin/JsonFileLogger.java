@@ -15,10 +15,10 @@ public class JsonFileLogger implements TraceLogger {
     private final TreeHelper helper;
     private final Logger callLogger;
     private final TreeMaker mkTree;
-    private final NodeIdFactory makeNodeId;
+    private final SourceFormat makeNodeId;
 
 
-    public JsonFileLogger(TreeHelper instr, NodeIdFactory makeNodeId) {
+    public JsonFileLogger(TreeHelper instr, SourceFormat makeNodeId) {
         this.helper = instr;
         this.mkTree = instr.mkTree;
         this.makeNodeId = makeNodeId;
@@ -38,16 +38,16 @@ public class JsonFileLogger implements TraceLogger {
 
     @Override
     public JCTree.JCStatement logForLoop(JCTree.JCForLoop loop, Symbol.MethodSymbol currMethod) {
-        NodeIdFactory.NodeId loopId = makeNodeId.mutipleLineNode;
+        SourceFormat.NodeSourceFormat loopId = makeNodeId.nodeId(loop.body);
 
         loop.body = enterExitFlow(loop.body, loopId);
-        return loop;//enterExitFlow(loop, makeNodeId.mutipleLineNode);
+        return loop;
     }
 
     @Override
     public JCTree.JCStatement logWhileLoop(JCTree.JCWhileLoop loop, Symbol.MethodSymbol currMethod) {
-        loop.body = enterExitFlow(loop.body, makeNodeId.mutipleLineNode);
-        return loop;//enterExitFlow(loop, makeNodeId.mutipleLineNode);
+        loop.body = enterExitFlow(loop.body, makeNodeId.nodeId(loop.body));
+        return loop;
     }
 
     @Override
@@ -55,19 +55,19 @@ public class JsonFileLogger implements TraceLogger {
         JCTree.JCStatement then = branch.thenpart;
         JCTree.JCStatement elsePart = branch.elsepart;
         if (then != null) {
-            branch.thenpart = enterExitFlow(then, makeNodeId.mutipleLineNode);
+            branch.thenpart = enterExitFlow(then, makeNodeId.nodeId(branch.thenpart));
         }
         if (elsePart != null) {
-            branch.elsepart = enterExitFlow(elsePart, makeNodeId.mutipleLineNode);
+            branch.elsepart = enterExitFlow(elsePart, makeNodeId.nodeId(branch.elsepart));
         }
-        return branch;//enterExitFlow(branch, makeNodeId.mutipleLineNode);
+        return branch;
     }
 
     @Override
     public JCTree.JCStatement logIfElse(JCTree.JCIf branch, Symbol.MethodSymbol currMethod) {
         JCTree.JCStatement then = branch.thenpart;
         if (then != null) {
-            branch.thenpart = enterExitFlow(then, makeNodeId.mutipleLineNode);
+            branch.thenpart = enterExitFlow(then, makeNodeId.nodeId(branch.thenpart));
         }
 
         return branch;
@@ -77,7 +77,7 @@ public class JsonFileLogger implements TraceLogger {
     public JCTree.JCMethodDecl logMethod(JCTree.JCMethodDecl method, Symbol.MethodSymbol currMethod) {
         JCTree.JCBlock body = method.getBody();
 
-        body.stats = enterExitFlow(body.getStatements(), makeNodeId.mutipleLineNode);
+        body.stats = enterExitFlow(body.getStatements(), makeNodeId.nodeId(method.body));
         return method;
     }
 
@@ -86,7 +86,7 @@ public class JsonFileLogger implements TraceLogger {
 
         ret.expr = exitFlow(ret.expr,
                 currMethod.getReturnType(),
-                makeNodeId.mutipleLineNode,
+                makeNodeId.nodeId(ret),
                 currMethod);
         return ret;
     }
@@ -126,7 +126,7 @@ public class JsonFileLogger implements TraceLogger {
         List<Symbol.VarSymbol> symbols = argsSymbols(call, currMethod);
         Symbol.VarSymbol notUsed = new Symbol.VarSymbol(0, helper.name("+++"), helper.intP, currMethod);
 
-        NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
+        SourceFormat.NodeSourceFormat id = makeNodeId.nodeId(call);
 
         JCTree.JCExpression logArgsAndCall = mkTree.LetExpr(
                 storeArgValues(symbols, call.args).append(mkTree.VarDef(notUsed, callLogger.resultCall.callStatic(id.identifier(), "", symbols))),
@@ -146,7 +146,7 @@ public class JsonFileLogger implements TraceLogger {
         if (!call.type.equals(helper.voidP))
             throw new IllegalArgumentException();
 
-        NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
+        SourceFormat.NodeSourceFormat id = makeNodeId.nodeId(call);
 
 
 
@@ -187,7 +187,7 @@ public class JsonFileLogger implements TraceLogger {
     public JCTree.JCExpression logUnaryStatement(JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
         String name = unary.getExpression().toString();
 
-        NodeIdFactory.NodeId id = makeNodeId.nodeId(unary);
+        SourceFormat.NodeSourceFormat id = makeNodeId.nodeId(unary);
 
         JCTree.JCExpression withUpdate = extractIdentifier(
                 (result) -> {
@@ -203,7 +203,7 @@ public class JsonFileLogger implements TraceLogger {
 
     @Override
     public JCTree.JCExpression logAssignStatement(JCTree.JCAssign assign, Symbol.MethodSymbol currentMethod) {
-        NodeIdFactory.NodeId id = makeNodeId.nodeId(assign);
+        SourceFormat.NodeSourceFormat id = makeNodeId.nodeId(assign);
         JCTree.JCExpression tmp = extractIdentifier(
                 (result) -> {
                     assign.lhs = result.snd;
@@ -218,7 +218,7 @@ public class JsonFileLogger implements TraceLogger {
 
     @Override
     public JCTree.JCExpression logAssignOpStatement(JCTree.JCAssignOp assign, Symbol.MethodSymbol currMethod) {
-        NodeIdFactory.NodeId id = makeNodeId.nodeId(assign);
+        SourceFormat.NodeSourceFormat id = makeNodeId.nodeId(assign);
         return extractIdentifier(
                 (result) -> {
                     assign.lhs = result.snd;
@@ -248,7 +248,7 @@ public class JsonFileLogger implements TraceLogger {
         }
     }
 
-    private JCTree.JCExpression assignHelper(JCTree.JCExpression assign, NodeIdFactory.NodeId id, Logger.Identifier identifier, Symbol.MethodSymbol currMethod){
+    private JCTree.JCExpression assignHelper(JCTree.JCExpression assign, SourceFormat.NodeSourceFormat id, Logger.Identifier identifier, Symbol.MethodSymbol currMethod){
 
         JCTree.JCExpression withUpdate = logUpdate(
                 assign,
@@ -276,7 +276,7 @@ public class JsonFileLogger implements TraceLogger {
         List<Symbol.VarSymbol> symbols = argsSymbols(call.constructorType.getParameterTypes(), currMethod);
         Symbol.VarSymbol logMethod = new Symbol.VarSymbol(0, helper.name("+++"), helper.intP, currMethod);
 
-        NodeIdFactory.NodeId id = makeNodeId.nodeId(call);
+        SourceFormat.NodeSourceFormat id = makeNodeId.nodeId(call);
 
         JCTree.JCExpression logArgsAndCall = mkTree.LetExpr(
                 storeArgValues(symbols, call.args).append(mkTree.VarDef(logMethod, callLogger.resultCall.callStatic(id.identifier(), "", symbols))),
@@ -301,7 +301,7 @@ public class JsonFileLogger implements TraceLogger {
     public JCTree.JCExpression logUnaryExpr(JCTree.JCUnary unary, Symbol.MethodSymbol currMethod) {
         String name = unary.getExpression().toString();
 
-        NodeIdFactory.NodeId id = makeNodeId.nodeId(unary);
+        SourceFormat.NodeSourceFormat id = makeNodeId.nodeId(unary);
         //nearly the same code as statement we should factor it, if one change likely the other
         JCTree.JCExpression withUpdate = extractIdentifier(
                 (result) -> {
@@ -328,25 +328,25 @@ public class JsonFileLogger implements TraceLogger {
      ********* Inject Flow
      **************/
 
-    private List<JCTree.JCStatement> enterExitFlow(List<JCTree.JCStatement> stats, NodeIdFactory.NodeId id) {
+    private List<JCTree.JCStatement> enterExitFlow(List<JCTree.JCStatement> stats, SourceFormat.NodeSourceFormat id) {
         return applyBeforeAfter(stats,
                 () -> callLogger.simpleFlow.enter(id.identifier()),
                 () -> callLogger.simpleFlow.exit(id.identifier()));
     }
 
-    private JCTree.JCStatement enterExitFlow(JCTree.JCStatement stat, NodeIdFactory.NodeId id) {
+    private JCTree.JCStatement enterExitFlow(JCTree.JCStatement stat, SourceFormat.NodeSourceFormat id) {
         return applyBeforeAfter(stat,
                 () -> callLogger.simpleFlow.enter(id.identifier()),
                 () -> callLogger.simpleFlow.exit(id.identifier()));
     }
 
-    private JCTree.JCStatement enterFlow(JCTree.JCStatement stat, NodeIdFactory.NodeId id) {
+    private JCTree.JCStatement enterFlow(JCTree.JCStatement stat, SourceFormat.NodeSourceFormat id) {
         return applyBefore(stat,
                 () -> callLogger.simpleFlow.enter(id.identifier()));
     }
 
 
-    private JCTree.JCExpression exitFlow(JCTree.JCExpression expr, Type exprType, NodeIdFactory.NodeId id, Symbol.MethodSymbol method) {
+    private JCTree.JCExpression exitFlow(JCTree.JCExpression expr, Type exprType, SourceFormat.NodeSourceFormat id, Symbol.MethodSymbol method) {
         return applyAfter(expr, exprType, symbol -> callLogger.simpleFlow.exit(id.identifier()), method);
     }
 
@@ -357,7 +357,7 @@ public class JsonFileLogger implements TraceLogger {
 
     private JCTree.JCExpression enterExitStatement(JCTree.JCExpression expr,
                                                    Type exprType,
-                                                   NodeIdFactory.NodeId id,
+                                                   SourceFormat.NodeSourceFormat id,
                                                    Symbol.MethodSymbol method) {
 
         return applyBeforeAfter(expr,
@@ -374,7 +374,7 @@ public class JsonFileLogger implements TraceLogger {
 
     private JCTree.JCExpression enterExitExpression(JCTree.JCExpression expr,
                                                     Type exprType,
-                                                    NodeIdFactory.NodeId id,
+                                                    SourceFormat.NodeSourceFormat id,
                                                     Symbol.MethodSymbol method) {
         return null;
 //        callLogger.
@@ -392,7 +392,7 @@ public class JsonFileLogger implements TraceLogger {
 
     private JCTree.JCExpression logUpdate(JCTree.JCExpression expr,
                                           Type exprType,
-                                          NodeIdFactory.NodeId id,
+                                          SourceFormat.NodeSourceFormat id,
                                           Logger.Identifier identifier,
                                           Symbol.MethodSymbol method) {
 

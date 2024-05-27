@@ -1,3 +1,5 @@
+import java.lang.reflect.Field;
+
 public class Exemple {
     public static void main(String[] args) {
         Object x = null;
@@ -15,7 +17,6 @@ public class Exemple {
         }
 
     }
-
     public static int foo(int a, int b) {
 
         return a+b;
