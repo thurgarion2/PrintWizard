@@ -270,6 +270,16 @@ public class TreeInstrumenter extends TreeTranslator {
     }
 
     @Override
+    public void visitBinary(JCTree.JCBinary tree){
+        makeNodeId.nodeId(tree);
+        super.visitBinary(tree);
+        this.result = traceLogger.logExpression(
+                (JCTree.JCExpression) this.result,
+                currentMethod
+        );
+    }
+
+    @Override
     public void visitVarDef(JCTree.JCVariableDecl tree) {
         super.visitVarDef(tree);
         //we are in a method parameter

@@ -66,6 +66,15 @@
     float: right;
 }
 
+.object {
+    display: block;
+    border: solid black;
+    border-radius: 5px;
+    padding: 1em;
+    margin: 2px;
+}
+
 .button {
-    text-shadow: #FC0 1px 0 10px;
+    border: 2mm ridge;
+    display: inline-block;
 }

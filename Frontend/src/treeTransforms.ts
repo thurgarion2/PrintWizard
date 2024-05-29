@@ -1,77 +1,80 @@
 export {
-    scopedTreeTransform,
-    ScopedLabel
+    scopedContextTransform,
+    EventWithContext
 };
 import {
-    EVENT,
-    Label,
-    LabelPos,
-    EventKind
+    Event,
+    EventKind,
+    EventKindTypes,
+    ExecutionStep
 } from "./event";
 
 /*******************************************************
  **************** transform ******************
  *******************************************************/
-type ScopedLabel<Context, State> = { label: Label, context: Context, state: { store : State} }
 
-function scopedTreeTransform<Context, State>(
-    labels: Label[],
+/**************
+ ********* types
+ **************/
+
+type ExecutionWithContext<Context, State> = EventWithContext<Context, State> | ExecutionStep
+
+
+// an event is an ordered list of execution steps
+// an event represent a logical group of steps
+interface EventWithContext<Context, State> {
+    type: 'Event',
+    context: Context, 
+    state: State,
+    // the ordered list of executions steps 
+    executions: () => ExecutionWithContext<Context, State>[],
+    kind: EventKind,
+}
+
+/**************
+ ********* implementation
+ **************/
+
+function scopedContextTransform<Context, State>(
+    root: Event,
     rootContext: Context,
-    aggregate: (event: EVENT, state: State[]) => State,
-    propagate: (event: EVENT, ctx: Context) => Context
-): ScopedLabel<Context, State>[] {
-    let output: { label: Label, context: Context, state:  { store : State} }[] = []
+    aggregate: (event: Event, state: State[]) => State,
+    propagate: (event: Event, ctx: Context) => Context
+): EventWithContext<Context, State> {
 
-    function scopedTreeTransformHelper(
-        context: Context,
-        treeStartIndex: number
-    ): [State[], number] {
-        const label = labels[treeStartIndex]
-        let state : State 
+    function helper(event: Event, context: Context): EventWithContext<Context, State> {
+        let children : ExecutionWithContext<Context, State>[] = []
+        let childStates : State[] = []
+        let childContext = propagate(event, context)
 
-        switch (label.pos) {
-            case LabelPos.UPDATE:
-                state = aggregate(label.event, [])
-                output.push({ label: label, context: context, state: {store : state} });
-                return [[state], treeStartIndex];
-            case LabelPos.START:
-                const nextContext = propagate(label.event, context)
-                let s  = { store : undefined as State}
-                output.push({ label: label, context: context, state: s });
+        event.executions().forEach(child => {
+            switch (child.type) {
+                case 'ExecutionStep':
+                    children.push(child)
+                    break;
+                case 'Event':
+                    let childWithContext = helper(child,childContext)
+                    children.push(childWithContext)
 
-                let index = treeStartIndex + 1
-                let childStates = []
-                
-                consume: while(true){
-                    switch(labels[index].pos){
-                        case LabelPos.END:
-                            output.push({ label: labels[index], context: context, state: s });
-                            break consume;
-                        case LabelPos.CALL:
-                            output.push({ label: labels[index], context: context, state: s });
-                            index = index + 1;
+                    switch (child.kind.type) {
+                        // we don't pass state through change of control flow
+                        case EventKindTypes.Flow:
                             break;
-                        case LabelPos.START:
-                        case LabelPos.UPDATE:
-                            let [state, endIdx] = scopedTreeTransformHelper(nextContext, index)
-                            index = endIdx + 1
-                            childStates.push(...state)
+                        default:
+                            childStates.push(childWithContext.state)
                     }
-                }
-                state = aggregate(label.event, childStates)
-                s['store'] = state as State
+            }
+        })
 
-                const kind = label.event.description.kind
-                return [ kind === EventKind.Flow ? [] : [state], index]
-            case LabelPos.CALL:
-            case LabelPos.END:
-                console.log("label end without label start")
-                throw new Error()
+        return {
+            type: 'Event',
+            context: context, 
+            state: aggregate(event, childStates),
+            // the ordered list of executions steps 
+            executions: () => children,
+            kind: event.kind,
         }
     }
 
-    scopedTreeTransformHelper(rootContext, 0)
-    console.assert(output.length===labels.length, "we are missing some labels")
-
-    return output;
+    return helper(root, rootContext);
 }

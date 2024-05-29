@@ -242,11 +242,10 @@ public class SourceFormat {
     private final SourceFormatDescription.SourceFile sourceFile;
 
     // for the cache we could use start and end information
-    private final Map<String, NodeSourceFormat> cache;
+    private final Map<JCTree, NodeSourceFormat> cache;
 
 
     public SourceFormat(JCTree.JCCompilationUnit compilationUnit) {
-        this.treeNodeToPos = new TreeNodeToPos(compilationUnit.getLineMap(), compilationUnit.endPositions);
 
         ExpressionTree packageName = compilationUnit.getPackageName();
         this.sourceFile = new SourceFormatDescription.SourceFile(
@@ -266,6 +265,7 @@ public class SourceFormat {
             }
         }),
                 compilationUnit.getLineMap());
+        this.treeNodeToPos = new TreeNodeToPos(compilationUnit.getLineMap(), compilationUnit.endPositions, source);
     }
 
     private static CharSequence applyWithAssert(JavaFileObject o, Function<PathFileObject, CharSequence> f) {
@@ -290,14 +290,13 @@ public class SourceFormat {
     // children should be inside the node
     public NodeSourceFormat nodeId(JCTree node, List<? extends JCTree> children) {
 
+        if (cache.containsKey(node)) {
+            return cache.get(node);
+        }
+
         return switch (treeNodeToPos.pos(node)) {
             case TreeNodeToPos.NotInFile ignored -> new AbsentFromSourceCode();
             case TreeNodeToPos.TreePos pos -> {
-                String key = nodeKey(pos);
-                if (cache.containsKey(key)) {
-                    yield cache.get(key);
-                }
-
 
                 List<PresentInSourceCode.Token> expression = new ArrayList<>();
                 Stream<LineOrChild> childRanges = IntStream.range(0, children.size())
@@ -352,7 +351,7 @@ public class SourceFormat {
                         pos.startLine + ":" + pos.startCol,
                         pos.endLine + ":" + pos.endCol
                 );
-                cache.put(key, nodeFormat);
+                cache.put(node, nodeFormat);
                 yield nodeFormat;
             }
         };
@@ -399,7 +398,16 @@ public class SourceFormat {
 
 
     public void end() {
-        SourceFormatDescription description = new SourceFormatDescription(sourceFile, cache);
+        //there may be duplicate
+        Map<String, NodeSourceFormat> nodes = new HashMap<>();
+        cache.entrySet()
+                .stream()
+                .filter(e -> !(e.getValue() instanceof AbsentFromSourceCode))
+                .forEach(e -> nodes.put(e.getValue().identifier(), e.getValue()));
+
+        SourceFormatDescription description = new SourceFormatDescription(
+                sourceFile,
+                nodes);
         try (
                 FileWriter f = new FileWriter("source_format.json");
                 BufferedWriter writer = new BufferedWriter(f)
@@ -414,13 +422,19 @@ public class SourceFormat {
      ********* translate tree node to a position in the source file
      **************/
 
-    private record TreeNodeToPos(LineMap lineMap, EndPosTable endPosTable) {
+    private record TreeNodeToPos(LineMap lineMap, EndPosTable endPosTable, SourceCode source) {
 
         public Pos pos(JCTree tree) {
             int startIndex = tree.getStartPosition();
             int endIndex = endPosTable.getEndPos(tree);
 
-            if (startIndex != Position.NOPOS && endIndex != Position.NOPOS && startIndex != endIndex) {
+            // we don't have end position information for some nodes
+            if(endIndex == Position.NOPOS && startIndex!=Position.NOPOS && startIndex!=0){
+                SourceCode.Range lineRange = source.line((int)lineMap.getLineNumber(startIndex));
+                endIndex = lineRange.end-1;
+            }
+
+            if (startIndex != Position.NOPOS && endIndex != Position.NOPOS && startIndex != endIndex && startIndex!=0) {
 
                 return new TreePos(
                         (int) lineMap.getLineNumber(startIndex),

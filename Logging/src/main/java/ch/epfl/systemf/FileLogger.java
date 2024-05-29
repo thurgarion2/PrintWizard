@@ -19,6 +19,32 @@ public class FileLogger {
     /**************
      ********* Event
      **************/
+
+    sealed interface GroupEvent {
+        long eventId();
+    }
+
+    public final class ControlFlow implements GroupEvent {
+        @Override
+        public long eventId() {
+            return 0;
+        }
+    }
+
+    public final class Statment implements GroupEvent {
+        @Override
+        public long eventId() {
+            return 0;
+        }
+    }
+
+    public final class SubStatment implements GroupEvent {
+        @Override
+        public long eventId() {
+            return 0;
+        }
+    }
+
     public static sealed abstract class Event {
         public static int logLabel(EventType type, LabelPos pos, String nodeId, List<Data> data) {
             long eventId = switch (pos) {

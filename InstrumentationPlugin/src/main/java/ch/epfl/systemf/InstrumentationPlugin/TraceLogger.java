@@ -56,4 +56,6 @@ public interface TraceLogger {
 
     public JCTree.JCExpression logUnaryExpr(JCTree.JCUnary unary, Symbol.MethodSymbol currMethod);
 
+    public JCTree.JCExpression logExpression(JCTree.JCExpression statement, Symbol.MethodSymbol currentMethod);
+
 }

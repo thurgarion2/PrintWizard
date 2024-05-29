@@ -1,14 +1,16 @@
 import {
-    EVENT,
+    Event,
+    EventKind,
+    EventKindTypes,
+    ExecutionStepTypes,
+    SimpleExpression,
+    Call,
+    VoidCall,
     InstanceReference,
     Value,
     Identifier,
     NodeSourceFormat,
-    UPDATE,
-    LabelPos,
     Result,
-    EventKind,
-    EventSubKind,
     DataType,
     Data,
     Write,
@@ -16,38 +18,40 @@ import {
     FieldIdentifier,
     PresentInSourceCode,
     valueFromJson,
-    ArgsValues
+    ArgsValues,
+    ExecutionStep
 } from './event';
 import { objectDataCache } from './fetch';
-import { ScopedLabel } from './treeTransforms';
+import { EventWithContext } from './treeTransforms';
 export {
-    isDisplayed,
-    labelItem,
     initialContext,
     propagateItemContext,
-    aggregateItemState
+    aggregateItemState,
+    traceItem
 };
 
 /**************
  ********* CONSTANTS
  **************/
 
-const EmojiStart = 0x1F0C;
-const EmojiEnd = 0x1F9FF;
+const EmojiStart = 0x1F600;
+const EmojiEnd = 0x1F64F;
 const SPACE = '\u00A0';
 
 
 /*******************************************************
- **************** transform ******************
+ **************** display tree ******************
  *******************************************************/
 
 /**************
  ********* Types
  **************/
 
-interface LabelItem {
-    html: () => HTMLElement
+interface TraceItem {
+    html: () => HTMLElement,
+
 }
+
 
 type ItemContext = {
     ident: number
@@ -61,47 +65,75 @@ interface DisplayObject {
     inspect: (obj: InstanceReference) => void
 }
 
+
+
 /**************
  ********* transforms
  **************/
 
-function labelItem(label: ScopedLabel<ItemContext, ItemState>): LabelItem {
-    const ctx = label.context
-    const event = label.label.event
-    const state = label.state
+function traceItem(event: EventWithContext<ItemContext, ItemState>): TraceItem {
+
+    type HelperResult = {
+        item: HTMLElement
+        defaultHidden: HTMLElement[]
+    }
+
+    function helper(event: EventWithContext<ItemContext, ItemState>): HelperResult {
+        let trace: HTMLElement[] = []
+        let defaultHidden: HTMLElement[] = []
+        let mainExecutionStep: undefined | HTMLElement = undefined
+        const codeToHtml = event.kind.type === EventKindTypes.Statement ? statmentCodeToHtml : subStatmentCodeToHtml;
+
+        event.executions().forEach(child => {
+            switch (child.type) {
+                case 'ExecutionStep':
+                    console.assert(mainExecutionStep === undefined, 'more than 1 execution in an event')
+                    mainExecutionStep = itemToHtml(event.context, event.state.writes, child, codeToHtml)
+                    trace.push(mainExecutionStep)
+                    break;
+                case 'Event':
+                    const res = helper(child)
+                    trace.push(res.item)
+
+                    defaultHidden.push(...res.defaultHidden)
+
+            }
+        })
+
+        switch (event.kind.type) {
+            case EventKindTypes.Flow:
+                console.assert(defaultHidden.length === 0, 'should not have any hidden step')
+                return {
+                    item: defaultBox(trace),
+                    defaultHidden: []
+                }
+            case EventKindTypes.Update:
+                return {
+                    item: empty(),
+                    defaultHidden: []
+                }
+            case EventKindTypes.Statement:
+                console.assert(mainExecutionStep !== undefined)
+                offToggleBox(mainExecutionStep,
+                    () => { defaultHidden.forEach(hide) },
+                    () => { defaultHidden.forEach(show) })
+                return {
+                    item: defaultBox(trace),
+                    defaultHidden: []
+                }
+            case EventKindTypes.SubStatement:
+                console.assert(mainExecutionStep !== undefined)
+                defaultHidden.push(mainExecutionStep)
+                return {
+                    item: defaultBox(trace),
+                    defaultHidden: defaultHidden
+                }
+        }
+    }
+    let html = helper(event).item
 
     return {
-        html: () => itemHtml(
-            ctx,
-            event.instanceInfo.nodeId,
-            state.store.writes,
-            event
-        )
-    }
-}
-
-function isDisplayed(label: ScopedLabel<ItemContext, ItemState>): boolean {
-    const ctx = label.context
-    const l = label.label
-    const event = label.label.event
-    const state = label.state
-
-    switch (event.description.kind) {
-        case EventKind.Flow: return false;
-        case EventKind.Update: return false;
-        case EventKind.Expression:
-        case EventKind.Statement:
-            switch (event.description.subkind) {
-                case EventSubKind.Simple:
-                    return l.pos === LabelPos.END;
-                case EventSubKind.CallVoid:
-                case EventSubKind.ResultCall:
-                    return l.pos === LabelPos.CALL;
-                default:
-                    return false;
-            }
-        default:
-            throw new Error("missing case " + event.description.kind);
+        html: () => html
     }
 }
 
@@ -116,20 +148,19 @@ const initialContext: ItemContext = {
 
 
 
-function propagateItemContext(event: EVENT, ctx: ItemContext): ItemContext {
-    switch (event.description.kind) {
-        case EventKind.Flow:
+function propagateItemContext(event: Event, ctx: ItemContext): ItemContext {
+    switch (event.kind.type) {
+        case EventKindTypes.Flow:
             return { ident: ctx.ident + 1 };
         default:
             return ctx;
     }
 }
 
-function aggregateItemState(event: EVENT, states: ItemState[]): ItemState {
-    switch (event.description.kind) {
-        case EventKind.Update:
-            const update: UPDATE = event as UPDATE
-            return { writes: update.write ? [update.write] : [] };
+function aggregateItemState(event: Event, states: ItemState[]): ItemState {
+    switch (event.kind.type) {
+        case EventKindTypes.Update:
+            return { writes: event.kind.write ? [event.kind.write] : [] };
 
         default:
             return {
@@ -150,38 +181,38 @@ function aggregateItemState(event: EVENT, states: ItemState[]): ItemState {
  **************/
 
 /********
+**** types 
+********/
+
+type NodeData = {
+    result: Value | undefined,
+    assigns: Write[],
+    childrenValues: Value[]
+}
+
+/********
 **** transformation
 ********/
+
+function nodeData(step: ExecutionStep, assigns: Write[]) {
+    return {
+        result: step.kind.result,
+        assigns: assigns,
+        childrenValues: step.kind.argVaules === undefined ? [] : step.kind.argVaules
+    }
+}
 
 const SPACES_PER_IDENT_LEVEL = 6
 
 
 function nodeSythaxToHtml(
     synthax: PresentInSourceCode,
-    result: Result | undefined,
-    assigns: Write[],
     indentLevel: number,
     inspector: DisplayObject,
-    childrenValues: ArgsValues | undefined): HTMLElement {
-
-
-
-    const resultHtml = result === undefined ? [] : [dataElement(result, inspector)]
-    const assignsHtml = assigns.map(assign => assignToHtml(assign, inspector))
-
-    console.assert(childrenValues === undefined || childrenValues.values.length === synthax.children.length)
-
-    let code: Node[] = []
-
-    code.push(...tokenToHtml(synthax.prefix, (index: number) => undefined))
-
-
-    code.push(box(
-        PrintWizardStyle.Expression,
-        synthax.expression.tokens.flatMap(token => tokenToHtml(token, argumentValue(childrenValues, inspector))
-        )))
-    code.push(...[...resultHtml, ...assignsHtml])
-    code.push(...tokenToHtml(synthax.suffix, (index: number) => undefined))
+    nodeData: NodeData,
+    formatCode: (synthax: PresentInSourceCode,
+        inspector: DisplayObject,
+        nodeData: NodeData) => HTMLElement): HTMLElement {
 
 
     return box(PrintWizardStyle.Code, [
@@ -189,8 +220,62 @@ function nodeSythaxToHtml(
             lineRange(synthax.startLine, synthax.endLine + 1)
                 .map(l => textBox(PrintWizardStyle.LineNumber, l.toString()))),
         widthBox(SPACES_PER_IDENT_LEVEL * indentLevel),
-        defaultBox(code)
+        formatCode(synthax, inspector, nodeData)
     ])
+}
+
+function statmentCodeToHtml(
+    synthax: PresentInSourceCode,
+    inspector: DisplayObject,
+    nodeData: NodeData): HTMLElement {
+
+    console.assert(
+        nodeData.childrenValues === undefined ||
+        nodeData.childrenValues.length === synthax.children.length)
+
+    const resultHtml = nodeData.result === undefined ?
+        [] :
+        [box(PrintWizardStyle.Result, [textEl("\u27A1"), displayValue(nodeData.result, inspector)])];
+
+
+    let code: Node[] = [
+        textEl(synthax.prefix.text),
+        box(
+            PrintWizardStyle.Expression,
+            synthax.expression.tokens.flatMap(token => tokenToHtml(token, argumentValue(nodeData.childrenValues, inspector))
+            )),
+        ...resultHtml,
+        ...nodeData.assigns.map(assign => assignToHtml(assign, inspector)),
+        textEl(synthax.suffix.text)
+    ]
+    return defaultBox(code);
+}
+
+function subStatmentCodeToHtml(
+    synthax: PresentInSourceCode,
+    inspector: DisplayObject,
+    nodeData: NodeData): HTMLElement {
+
+    console.assert(
+        nodeData.childrenValues === undefined ||
+        nodeData.childrenValues.length === synthax.children.length)
+
+    const resultHtml = nodeData.result === undefined ?
+        [] :
+        [box(PrintWizardStyle.Result, [textEl("\u27A1"), displayValue(nodeData.result, inspector)])];
+
+
+    let code: Node[] = [
+        textEl(SPACE.repeat(synthax.prefix.text.length)),
+        box(
+            PrintWizardStyle.Expression,
+            synthax.expression.tokens.flatMap(token => tokenToHtml(token, argumentValue(nodeData.childrenValues, inspector))
+            )),
+        ...resultHtml,
+        ...nodeData.assigns.map(assign => assignToHtml(assign, inspector))
+    ]
+
+    return defaultBox(code);
 }
 
 /********
@@ -203,14 +288,10 @@ function nodeSythaxToHtml(
 **** helper
 ********/
 
-function argumentValue(childrenValues: ArgsValues | undefined, inspector: DisplayObject): (index: number) => Node[] | undefined {
-    if(childrenValues === undefined){
-        return (index : number) => undefined
-    }else{
-        return (index : number) => {
-            const value = childrenValues.values[index]
-            return value === undefined ? undefined : [textEl(':'), displayValue(value, inspector)];
-        }
+function argumentValue(childrenValues: Value[], inspector: DisplayObject): (index: number) => Node[] | undefined {
+    return (index: number) => {
+        const value = childrenValues[index]
+        return value === undefined ? undefined : [textEl(':'), displayValue(value, inspector)];
     }
 
 }
@@ -233,7 +314,7 @@ function tokenToHtml(token: Token, childToNode: (index: number) => Node[] | unde
             return [textEl(token.text)]
         case 'Child':
             const childNode = childToNode(token.childIndex)
-          
+
             return [textEl(token.text), ... (childNode === undefined ? [empty()] : childNode)]
     }
 }
@@ -265,9 +346,9 @@ type ObjectData = {
 }
 
 function objectHtml(obj: ObjectData): HTMLElement {
-    return box(PrintWizardStyle.TraceItem, [
+    return box(PrintWizardStyle.Object, [
         box(PrintWizardStyle.Line, [referenceHtml(obj.self)]),
-        ...obj.fields.map(fieldHtml)
+        list(obj.fields.map(fieldHtml))
     ])
 }
 
@@ -277,12 +358,28 @@ type Field = {
 }
 
 function fieldHtml(field: Field): HTMLElement {
+    let item = defaultBox([])
 
-    return box(PrintWizardStyle.Line, [
+    const inspector = { inspect: (obj : InstanceReference) => { 
+        const key = obj.pointer.toString() + '-' + obj.version.toString()
+
+        const dataStore = objectDataCache().data()
+        if(dataStore.type==='success'){
+            const data = dataStore.payload[key]
+            if(data!==undefined){
+                item.append(objectHtml(data))
+            }
+        }
+    } }
+
+
+    item.append(...[
         textEl(field.identifier.name),
         textEl(" = "),
-        displayValue(valueFromJson(field.value), { inspect: (obj) => { } })
+        displayValue(valueFromJson(field.value), inspector)
     ])
+
+    return item
 }
 
 class ObjectInspector implements DisplayObject {
@@ -311,14 +408,14 @@ class ObjectInspector implements DisplayObject {
 
         switch (data.type) {
             case 'failure':
-                return box(PrintWizardStyle.TraceItem, [
+                return box(PrintWizardStyle.Object, [
                     box(PrintWizardStyle.TraceItem, [textEl(ref.className.className)]),
                     box(PrintWizardStyle.TraceItem, [textEl('data not loaded')])
                 ])
             case 'success':
                 const objData: undefined | ObjectData = data.payload[key]
                 if (objData === undefined) {
-                    return box(PrintWizardStyle.TraceItem, [
+                    return box(PrintWizardStyle.Object, [
                         box(PrintWizardStyle.Line, [referenceHtml(ref)]),
                         box(PrintWizardStyle.Line, [textEl('object not found')])
                     ])
@@ -336,16 +433,16 @@ class ObjectInspector implements DisplayObject {
  **************/
 
 
-
-
-function itemHtml(
+function itemToHtml(
     ctx: ItemContext,
-    node: NodeSourceFormat,
     assings: Write[],
-    event: EVENT): HTMLElement {
+    executionStep: ExecutionStep,
+    formatCode: (synthax: PresentInSourceCode,
+        inspector: DisplayObject,
+        nodeData: NodeData) => HTMLElement): HTMLElement {
 
 
-    switch (node.kind) {
+    switch (executionStep.nodeId.kind) {
         case 'absent':
             return empty()
 
@@ -355,43 +452,18 @@ function itemHtml(
             return box(PrintWizardStyle.TraceItem, [
                 inspector.html,
                 nodeSythaxToHtml(
-                    node,
-                    (event as any).result,
-                    assings,
+                    executionStep.nodeId,
                     ctx.ident,
                     inspector,
-                    (event as any).argsValues
+                    nodeData(executionStep, assings),
+                    formatCode
                 )
             ])
 
     }
 }
 
-/********
- **** utils
- ********/
 
-
-function dataElement(data: Data, model: DisplayObject): HTMLElement {
-    switch (data.dataType) {
-        case DataType.Result:
-            return box(PrintWizardStyle.Result, [textEl("\u27A1"), displayValue(data.value as Value, model)]);
-        case DataType.Write:
-            return box(PrintWizardStyle.Write,
-                [...displayIdentifier(data.identifier, model),
-                textEl('='),
-                displayValue(data.value as Value, model)
-                ]
-            )
-        case DataType.InstanceRef:
-        case DataType.StaticReference:
-            throw new Error("not implemented");
-        case DataType.ArgsValues:
-        case DataType.FieldIdentifier:
-        case DataType.LocalIdentifier:
-            return empty()
-    }
-}
 
 
 
@@ -472,6 +544,7 @@ enum PrintWizardStyle {
     LineNumbers = 'line_numbers',
     LineNumber = 'line_number',
     TraceItem = 'trace_item',
+    Object = 'object',
     Identation = 'indentation',
     Code = 'code',
     Expression = 'expression',
@@ -485,6 +558,14 @@ enum PrintWizardStyle {
 /**************
  ********* primitives
  **************/
+
+function hide(elem: HTMLElement) {
+    elem.style.display = 'none'
+}
+
+function show(elem: HTMLElement) {
+    elem.style.display = 'block'
+}
 
 
 function clickAction(elements: Node[], action: () => void): HTMLElement {
@@ -518,6 +599,41 @@ function box(style: PrintWizardStyle, elements: Node[]) {
     div.className = style;
     elements.map(child => div.appendChild(child));
     return div;
+}
+
+function list(elements: Node[]) {
+    let div = document.createElement("ul");
+    elements.map(child => {
+        let item = document.createElement("li");
+        item.appendChild(child)
+        div.appendChild(item)
+    });
+    return div;
+}
+
+enum ToggleBoxState {
+    ON,
+    OFF
+}
+
+function offToggleBox(elem: HTMLElement, off: () => void, on: () => void) {
+    off()
+
+    let state = ToggleBoxState.OFF
+
+    elem.addEventListener('click', () => {
+        switch (state) {
+            case ToggleBoxState.OFF:
+                on()
+                state = ToggleBoxState.ON
+                break;
+            case ToggleBoxState.ON:
+                off()
+                state = ToggleBoxState.OFF
+                break;
+        }
+    })
+    return elem;
 }
 
 function defaultBox(elements: Node[]) {

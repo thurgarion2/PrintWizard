@@ -1,6 +1,9 @@
 public class Supermarket {
 
     public static void main(String[] args) {
+        int x = 0, y = 1, z = 3;
+        int sum = x + y + z;
+
         Article cheese = new Article("cheese", new DollarAmount(5));
         Article bread = new Article("white bread", new DollarAmount(2));
         Article gameboy = new Article("gameboy", new DollarAmount(100));

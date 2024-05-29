@@ -6,6 +6,7 @@ import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.Pair;
+import org.w3c.dom.Node;
 
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -319,6 +320,12 @@ public class JsonFileLogger implements TraceLogger {
                 currMethod);
     }
 
+    @Override
+    public JCTree.JCExpression logExpression(JCTree.JCExpression statement, Symbol.MethodSymbol currentMethod) {
+        SourceFormat.NodeSourceFormat id = makeNodeId.nodeId(statement);
+        return enterExitExpression(statement, statement.type, id, currentMethod);
+    }
+
     /*******************************************************
      **************** Helpers ******************
      *******************************************************/
@@ -376,14 +383,12 @@ public class JsonFileLogger implements TraceLogger {
                                                     Type exprType,
                                                     SourceFormat.NodeSourceFormat id,
                                                     Symbol.MethodSymbol method) {
-        return null;
-//        callLogger.
-//
-//        return applyBeforeAfter(expr,
-//                exprType,
-//                () -> callLogger.enterExpression(id.identifier()),
-//                symbol -> callLogger.exitExpression(id.identifier(), symbol),
-//                method);
+
+        return applyBeforeAfter(expr,
+                exprType,
+                () -> callLogger.simpleExpression.enter(id.identifier()),
+                symbol -> callLogger.simpleExpression.exit(id.identifier(), symbol),
+                method);
     }
 
     /**************

@@ -1,12 +1,11 @@
 export {
-    EventId as EVENTID,
-    EventType,
     NodeSourceFormat,
-    EVENT,
-    STATMENT,
-    EXPRESSION,
-    FLOW,
-    UPDATE,
+    Event,
+    ExecutionStep,
+    ExecutionStepTypes,
+    SimpleExpression,
+    Call,
+    VoidCall,
     Value,
     SourceFormatDescription,
     PresentInSourceCode,
@@ -18,16 +17,14 @@ export {
     LocalIdentifier,
     Literal,
     FieldIdentifier,
-    Label,
     LabelPos,
     Result,
     EventKind,
     DataType,
     ArgsValues,
-    EventSubKind,
     InstanceReference,
-    parseRawLabels,
-    parseLabels,
+    EventKindTypes,
+    parseEventTrace,
     valueFromJson,
     findNodeSynthax
 }
@@ -39,95 +36,382 @@ import { sourceCodeCache } from "./fetch"
  **************** EVENTS ******************
  *******************************************************/
 
-type EVENT = FLOW | STATMENT | EXPRESSION | UPDATE | VoidCall | ResultCall
 
 /**************
- ********* types
+ ********* event definition
  **************/
 
+// an event is an ordered list of execution steps
+// an event represent a logical group of steps
 
-// every event has an unique description and data schema
-interface EventTemplate {
-    type: 'EVENT',
-    instanceInfo: InstanceInfo,
-    description: EventType,
-    idKey: string
-}
-
-// constraint idKey(event.description) === event.idKey
-// don't know how to enforce the constraint currently on the type system
-
-// the types below are help to programming but you should check the schema below to have 
-// that define the true information
-function idKey(t: EventType): string {
-    return t.kind + "-" + t.subkind;
-}
-
-interface STATMENT extends EventTemplate {
-    idKey: "statement-simple",
-    result: Result | undefined
-}
+// replace undefined with execution step
+type Execution = Event | ExecutionStep
 
 
-interface FLOW extends EventTemplate {
-    idKey: "flow-simple",
-}
-
-interface EXPRESSION extends EventTemplate {
-    idKey: "expression-simple",
-    result: Result | undefined
-}
-
-interface UPDATE extends EventTemplate {
-    idKey: "update-simple",
-    write: Write | undefined
+// an event is an ordered list of execution steps
+// an event represent a logical group of steps
+interface Event {
+    type: 'Event',
+    // the ordered list of executions steps 
+    executions: () => Execution[],
+    kind: EventKind,
 }
 
 /********
-**** call
+**** different event kinds
 ********/
 
-interface CallTemplate extends EventTemplate {
-    owner: Reference | undefined,
-    argsValues: ArgsValues | undefined
-}
+type EventKind = Statement | SubStatement | ControlFlow | Update
 
-interface VoidCall extends CallTemplate {
-    idKey: "statement-callVoid",
-}
-
-interface ResultCall extends CallTemplate {
-    idKey: "statement-resultCall",
-    result: Result | undefined
+enum EventKindTypes {
+    Statement = "statement",
+    SubStatement = "subStatement",
+    Flow = "flow",
+    Update = "update"
 }
 
 /********
-**** constructor
+**** events definition
 ********/
 
-function makeEvent(label: RawLabel): EVENT {
+type Statement = {
+    type: EventKindTypes.Statement
+}
+
+// by default we don't want to display all executions steps
+// so there is a sepration between the most outer statement
+// and its children
+type SubStatement = {
+    type: EventKindTypes.SubStatement
+}
+
+type ControlFlow = {
+    type: EventKindTypes.Flow
+}
+
+// update are leaf nodes and don't have any execution statement inside
+type Update = {
+    type: EventKindTypes.Update,
+    write: Write
+}
+
+/********
+**** events constructor
+********/
+
+function makeEvent(execution :  Execution[], kind : EventKind): Event {
     return {
-        type: 'EVENT',
-        instanceInfo: label.instanceInfo,
-        description: label.eventDescription,
-        idKey: idKey(label.eventDescription)
-    } as any
+        type: 'Event',
+        executions: () => execution,
+        kind: kind,
+    };
+}
+
+/**************
+ ********* execution step definition
+ **************/
+
+// an execution step is the evaluation of
+// an expression in the code
+interface ExecutionStep {
+    type: 'ExecutionStep',
+    nodeId: NodeSourceFormat,
+    kind: ExecutionStepType
+}
+
+/********
+****  executions step kinds
+********/
+
+type ExecutionStepType = SimpleExpression | Call | VoidCall
+
+enum ExecutionStepTypes {
+    SimpleExpression = "simpleExpression",
+    Call = "call",
+    VoidCall = "voidCall"
+}
+
+/********
+****  executions step specific defintion
+********/
+
+type SimpleExpression = {
+    type: ExecutionStepTypes.SimpleExpression,
+    result: Value
+}
+
+
+type Call = {
+    type: ExecutionStepTypes.Call,
+    result: Value,
+    argVaules: Value[]
+}
+
+type VoidCall = {
+    type: ExecutionStepTypes.VoidCall,
+    argVaules: Value[]
+}
+
+/********
+****  constructor
+********/
+
+function makeExecutionStep(nodeId: NodeSourceFormat, kind: ExecutionStepType): ExecutionStep {
+    return {
+        type: 'ExecutionStep',
+        nodeId: nodeId,
+        kind: kind
+    };
+}
+
+/*******************************************************
+ **************** parsing event trace ******************
+ *******************************************************/
+
+
+
+function parseEventTrace(jsonTrace: any[]): Event {
+    const labels = parseRawLabels(jsonTrace)
+    const [root, notUsed] = parseEvent(labels, 0)
+    
+    return root;
+}
+
+/**************
+ ********* parsing event tree
+ **************/
+
+/********
+**** types
+********/
+
+type EventState = {
+    state: Map<LabelPos, Data[]>,
+    nodeId: NodeSourceFormat
+}
+
+/********
+**** create Execution Step function
+********/
+
+// code is a bit ugly as I have not yet change the json format to reflect 
+// the change in the Event format
+function parseEvent(labels : RawLabel[], startIndex : number):[Event,number]{
+    const startLabel = labels[startIndex];
+    if(startLabel===undefined)
+        debugger;
+
+    if(startLabel.pos===LabelPos.UPDATE){
+        console.assert(startLabel.data.length===1)
+
+        return [makeEvent([], {
+            type: EventKindTypes.Update,
+            write: startLabel.data[0] as Write
+        }), startIndex]
+    }
+
+    let executions : any[] = []
+    let state : EventState = {
+        state: new Map(),
+        nodeId: startLabel.instanceInfo.nodeId
+    }
+
+    state.state.set(startLabel.pos, startLabel.data)
+
+    executions.push(labelToExecutionStep(startLabel.pos, startLabel.eventDescription))
+
+    let index = startIndex+1
+    let currentLabel = labels[index]
+
+
+
+    while(currentLabel.pos!==LabelPos.END){
+
+        switch(currentLabel.pos){
+            case LabelPos.CALL:
+                state.state.set(currentLabel.pos, currentLabel.data)
+                executions.push(labelToExecutionStep(currentLabel.pos, currentLabel.eventDescription))
+
+                index = index +1
+                currentLabel = labels[index]
+                break;
+            case LabelPos.UPDATE:
+            case LabelPos.START:
+                let [event, endIndex] : [Event, number] = parseEvent(labels, index)
+                index = endIndex +1
+                currentLabel = labels[index]
+               
+                executions.push(event)
+        }
+    }
+
+    state.state.set(currentLabel.pos, currentLabel.data)
+    executions.push(labelToExecutionStep(currentLabel.pos, currentLabel.eventDescription))
+    
+
+    executions = executions.map((x : any) => {
+        if(x.type==='Event'){
+            return x;
+        }else{
+            return x(state)
+        }
+    }).filter(x => x!==undefined)
+
+    let eventType : EventKind
+
+    switch(currentLabel.eventDescription.kind){
+        case 'expression':
+            eventType = {type : EventKindTypes.SubStatement}
+            break;
+        case 'flow':
+            eventType = {type : EventKindTypes.Flow}
+            break;
+        case 'statement':
+            eventType = {type : EventKindTypes.Statement}
+            break;
+        default:
+            debugger;
+            throw new Error('unhandled case')
+    }
+
+
+    return [makeEvent(executions, eventType), index]
+}
+
+
+/********
+**** create Execution Step function
+********/
+
+function labelToExecutionStep(pos: LabelPos, eventDescription: EventType): (state: EventState) => (ExecutionStep | undefined) {
+    // should be a big match but not supported in javascript :(
+   
+    switch (pos) {
+        case LabelPos.CALL:
+            if (eventDescription.subkind === 'resultCall') {
+               
+                return (state: EventState) => {
+                    let res = state.state.get(LabelPos.END)
+                    let args = state.state.get(LabelPos.CALL)
+
+                    console.assert(res.length === 0 || res.length === 1)
+                    console.assert(args.length === 0 || args.length === 2)
+
+                   
+                    return makeExecutionStep(state.nodeId, {
+                        type: ExecutionStepTypes.Call,
+                        argVaules: (extractFromArray(args, 1) as ArgsValues).values,
+                        result: (extractFromArray(res, 0) as Result).value
+                    })
+                }
+            }
+
+            if (eventDescription.subkind === 'callVoid') {
+               
+                return (state: EventState) => {
+                    let args = state.state.get(LabelPos.CALL)
+                    console.assert(args.length === 0 || args.length === 2)
+                   
+                    return makeExecutionStep(state.nodeId, {
+                        type: ExecutionStepTypes.VoidCall,
+                        argVaules: (extractFromArray(args, 1) as ArgsValues).values
+                    })
+                }
+            }
+            break;
+        case LabelPos.END:
+            if ((eventDescription.kind === 'expression' || eventDescription.kind === 'statement')
+                && eventDescription.subkind === 'simple') {
+                
+               
+                return (state: EventState) => {
+                    let res = state.state.get(LabelPos.END)
+
+                    console.assert(res.length === 0 || res.length === 1)
+                   
+                    return makeExecutionStep(state.nodeId, {
+                        type: ExecutionStepTypes.SimpleExpression,
+                        result: (extractFromArray(res, 0) as Result).value
+                    })
+                }
+            }
+        case LabelPos.UPDATE:
+        case LabelPos.START:
+            return (state: EventState) => undefined
+    }
+
+    throw new Error('case not covered');
+}
+
+function extractFromArray(data: Data[], index: number) {
+    if (data.length === 0) {
+        return undefined;
+    } else {
+        return data[index];
+    }
 }
 
 
 /**************
- ********* instance info 
+ ********* parsing raw label
  **************/
+
+/********
+**** types
+********/
+
+type RawLabel = {
+    pos: LabelPos,
+    instanceInfo: InstanceInfo,
+    eventDescription: EventType,
+    data: Data[]
+}
+
+type EventType = {
+    kind: string,
+    subkind: string
+}
+
+type EventId = { id: number }
+
 type InstanceInfo = {
     eventId: EventId,
     nodeId: NodeSourceFormat
 }
 
-type EventId = { id: number }
+enum LabelPos {
+    START = "start",
+    UPDATE = "update",
+    END = "end",
+    CALL = "call"
+}
 
 /********
-**** parsing
+****  parsing functions
 ********/
+
+function parseRawLabels(jsonTrace: any): RawLabel[] {
+    return jsonTrace["trace"].map(parseRawLabel)
+}
+
+const startIndexData = 5
+
+function parseRawLabel(json: any): RawLabel {
+
+    return {
+        pos: labelPosFromJson(json),
+        instanceInfo: instanceInfoFromJson(json),
+        eventDescription: eventTypeFromJson(json),
+        data: json.slice(startIndexData, json.length).map(dataFromJson)
+    }
+}
+
+function eventTypeFromJson(json: any[]): EventType {
+    const kind = readArrayField(4, json)
+    const subkind = readArrayField(3, json)
+    const t = { kind: kind, subkind: subkind }
+    return t
+}
 
 function instanceInfoFromJson(json: any[]): InstanceInfo {
     const eventId = { id: Number(readArrayField(1, json)) }
@@ -137,51 +421,19 @@ function instanceInfoFromJson(json: any[]): InstanceInfo {
         eventId: eventId,
         nodeId: findNodeSynthax(nodeId)
     }
-
 }
 
+const PosValues = Object.keys(LabelPos).map(key => (LabelPos as any)[key])
 
-/**************
- ********* event types
- **************/
-type EventType = { kind: string, subkind: string }
-
-/********
-**** parsing
-********/
-enum EventKind {
-    Statement = "statement",
-    Expression = "expression",
-    Flow = "flow",
-    Update = "update"
+function labelPosFromJson(json: any): LabelPos {
+    const labelPos = json[0]
+    if (PosValues.includes(labelPos)) {
+        return labelPos
+    } else {
+        return unableToParse(json)
+    }
 }
 
-enum EventSubKind {
-    Simple = "simple",
-    CallVoid = "callVoid",
-    ResultCall = "resultCall"
-}
-
-const eventTypes = {
-    statement: { kind: EventKind.Statement, subkind: EventSubKind.Simple },
-    expression: { kind: EventKind.Expression, subkind: EventSubKind.Simple },
-    update: { kind: EventKind.Update, subkind: EventSubKind.Simple },
-    flow: { kind: EventKind.Flow, subkind: EventSubKind.Simple },
-    voidCall: { kind: EventKind.Statement, subkind: EventSubKind.CallVoid },
-    resultCall: { kind: EventKind.Statement, subkind: EventSubKind.ResultCall }
-}
-const eventTypeKeys = Object.keys(eventTypes).map(k => idKey((eventTypes as any)[k]))
-
-
-function eventTypeFromJson(json: any[]): EventType {
-    const kind = readArrayField(4, json)
-    const subkind = readArrayField(3, json)
-    const t = { kind: kind, subkind: subkind }
-
-    if (!eventTypeKeys.includes(idKey(t)))
-        unableToParse(json)
-    return t
-}
 
 
 /*******************************************************
@@ -203,210 +455,6 @@ enum DataType {
     Literal = "literal"
 }
 
-enum LabelPos {
-    START = "start",
-    UPDATE = "update",
-    END = "end",
-    CALL = "call"
-}
-
-/********
-**** parsing
-********/
-
-const PosValues = Object.keys(LabelPos).map(key => (LabelPos as any)[key])
-
-function labelPosFromJson(json: any): LabelPos {
-    const labelPos = json[0]
-    if (PosValues.includes(labelPos)) {
-        return labelPos
-    } else {
-        return unableToParse(json)
-    }
-}
-
-/**************
- ********* Label
- **************/
-
-type Label = {
-    pos: LabelPos,
-    event: EVENT
-}
-
-/**************
- ********* parse label
- **************/
-
-function parseLabels(rawLabels: RawLabel[]): Label[] {
-    let partialEvents: Map<number, EVENT> = new Map()
-    return rawLabels.map(l => parseLabel(l, partialEvents))
-}
-
-function parseLabel(rawLabel: RawLabel, partialEvents: Map<number, EVENT>): Label {
-    let event: EVENT
-    const eventId = rawLabel.instanceInfo.eventId.id
-
-    switch (rawLabel.pos) {
-        case LabelPos.UPDATE:
-            event = makeEvent(rawLabel)
-            break;
-        case LabelPos.START:
-            event = makeEvent(rawLabel)
-            partialEvents.set(eventId, event);
-            break;
-        case LabelPos.END:
-            event = partialEvents.get(eventId) as EVENT
-            partialEvents.delete(eventId);
-            break;
-        case LabelPos.CALL:
-            event = partialEvents.get(eventId) as EVENT
-    }
-
-    schema.updateEventData(event, rawLabel)
-    return {
-        pos: rawLabel.pos,
-        event: event
-    }
-
-}
-
-/**************
- ********* schema
- **************/
-interface Schema {
-    updateEventData: (event: EVENT, label: RawLabel) => void,
-    with: (eventSchema: EventSchema) => Schema
-}
-
-function emptySchema(): Schema {
-    let labels: Map<string, LabelSchema> = new Map()
-    let self: Schema = {
-        updateEventData: (event: EVENT, label: RawLabel) => {
-            const s = labels.get(labelKey(event.description, label.pos))
-            if (s === undefined) {
-                unableToParse(label)
-            } else {
-                s.updateEventData(event, label)
-            }
-        }
-    } as Schema
-    self["with"] = (event: EventSchema) => {
-        event.labels.map(l => labels.set(labelKey(event.description, l.pos), l))
-        return self;
-    }
-    return self;
-}
-
-function labelKey(description: EventType, pos: LabelPos): string {
-    return idKey(description) + "-" + pos;
-}
-
-interface EventSchema {
-    description: EventType
-    labels: LabelSchema[],
-    with: (label: LabelSchema) => EventSchema
-}
-
-function eventSchema(description: EventType): EventSchema {
-    let labels: LabelSchema[] = []
-    let self: EventSchema = {
-        description: description,
-        labels: labels
-    } as EventSchema
-    self["with"] = (label: LabelSchema) => {
-        labels.push(label)
-        return self;
-    }
-    return self
-}
-
-interface LabelSchema {
-    pos: LabelPos
-    updateEventData: (event: EVENT, label: RawLabel) => void
-}
-
-function labelSchema(pos: LabelPos, data: [string, DataType[]][]): LabelSchema {
-    return {
-        pos: pos,
-        updateEventData: (event: EVENT, label: RawLabel) => {
-            const lData = label.data
-            if (lData.length === 0)
-                return;
-            if (lData.length !== data.length)
-                unableToParse(label.data)
-
-            for (let i = 0; i < data.length; ++i) {
-                const [field, dataTypes] = data[i]
-                const d = lData[i] as any
-                if (!dataTypes.includes(d.dataType)) {
-                    unableToParse(label.data)
-                }
-                (event as any)[field] = d
-            }
-        }
-    }
-}
-
-/********
-**** schema definition
-********/
-const refTypes = [DataType.InstanceRef, DataType.StaticReference]
-const resultField = 'result'
-
-const schema: Schema = emptySchema()
-    .with(eventSchema(eventTypes.expression)
-        .with(labelSchema(LabelPos.START, []))
-        .with(labelSchema(LabelPos.END, [[resultField, [DataType.Result]]])))
-    .with(eventSchema(eventTypes.flow)
-        .with(labelSchema(LabelPos.START, []))
-        .with(labelSchema(LabelPos.END, [])))
-    .with(eventSchema(eventTypes.statement)
-        .with(labelSchema(LabelPos.START, []))
-        .with(labelSchema(LabelPos.END, [[resultField, [DataType.Result]]])))
-    .with(eventSchema(eventTypes.update)
-        .with(labelSchema(LabelPos.UPDATE, [['write', [DataType.Write]]])))
-    .with(eventSchema(eventTypes.voidCall)
-        .with(labelSchema(LabelPos.START, []))
-        .with(labelSchema(LabelPos.CALL, [['owner', refTypes], ['argsValues', [DataType.ArgsValues]]]))
-        .with(labelSchema(LabelPos.END, [])))
-    .with(eventSchema(eventTypes.resultCall)
-        .with(labelSchema(LabelPos.START, []))
-        .with(labelSchema(LabelPos.CALL, [['owner', refTypes], ['argsValues', [DataType.ArgsValues]]]))
-        .with(labelSchema(LabelPos.END, [[resultField, [DataType.Result]]])))
-
-
-
-/**************
- ********* raw label
- **************/
-
-type RawLabel = {
-    pos: LabelPos,
-    instanceInfo: InstanceInfo,
-    eventDescription: EventType,
-    data: Data[]
-}
-
-/********
-**** parsing
-********/
-
-function parseRawLabels(jsonTrace: any): RawLabel[] {
-    return jsonTrace["trace"].map(parseRawLabel)
-}
-
-const startIndexData = 5
-
-function parseRawLabel(json: any): RawLabel {
-
-    return {
-        pos: labelPosFromJson(json),
-        instanceInfo: instanceInfoFromJson(json),
-        eventDescription: eventTypeFromJson(json),
-        data: json.slice(startIndexData, json.length).map(dataFromJson)
-    }
-}
 
 
 /*******************************************************

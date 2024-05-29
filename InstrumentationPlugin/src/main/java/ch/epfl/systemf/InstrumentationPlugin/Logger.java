@@ -16,6 +16,7 @@ public class Logger {
 
     final SimpleFlow simpleFlow = this.new SimpleFlow();
     final SimpleStatement simpleStatement = this.new SimpleStatement();
+    final SimpleExpression simpleExpression = this.new SimpleExpression();
     final VoidCall voidCall = this.new VoidCall();
     final Update update = this.new Update();
     final ResultCall resultCall = this.new ResultCall();
@@ -42,6 +43,19 @@ public class Logger {
 
     final class SimpleStatement implements Event {
         private static final TreeHelper.SimpleClass clazz = innerClass("SimpleStatement");
+
+        public JCTree.JCExpression enter(String nodeId) {
+            return callSimpleEnter(clazz, nodeId);
+        }
+
+        public JCTree.JCExpression exit(String nodeId, Symbol result) {
+            return callExitResult(clazz, nodeId, result);
+        }
+
+    }
+
+    final class SimpleExpression implements Event {
+        private static final TreeHelper.SimpleClass clazz = innerClass("SimpleExpression");
 
         public JCTree.JCExpression enter(String nodeId) {
             return callSimpleEnter(clazz, nodeId);
