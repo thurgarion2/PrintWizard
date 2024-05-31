@@ -1,2 +1,2 @@
-java -cp ./:./Logging/target/classes:./InstrumentationPlugin/target/classes -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8800 Supermarket
+java -cp ./:./Logging/target/classes:./InstrumentationPlugin/target/classes -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:8800 BasicOperation
 ##-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:8800 Exemple

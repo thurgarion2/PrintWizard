@@ -1,11 +1,11 @@
 package ch.epfl.systemf.InstrumentationPlugin;
 
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.util.JavacTask;
+import com.sun.source.util.Plugin;
 import com.sun.source.util.TaskEvent;
 import com.sun.source.util.TaskListener;
 import com.sun.tools.javac.api.BasicJavacTask;
-import com.sun.source.util.JavacTask;
-import com.sun.source.util.Plugin;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeMaker;
@@ -37,11 +37,10 @@ public class SampleJavacPlugin implements Plugin {
             public void finished(TaskEvent e) {
                 if(e.getKind()== TaskEvent.Kind.ANALYZE){
                     TreeHelper instr = new TreeHelper(mkTree,names, symb);
+                    Logger logHelper = new Logger(instr);
                     SourceFormat makeNodeId = new SourceFormat((JCTree.JCCompilationUnit)e.getCompilationUnit());
-                    TraceLogger traceLogger = new JsonFileLogger(instr, makeNodeId);
-                    TreeInstrumenter t = new TreeInstrumenter(traceLogger, instr, makeNodeId);
+                    TreeInstrumenter t = new TreeInstrumenter(logHelper, instr, makeNodeId);
                     t.translate((JCTree.JCCompilationUnit)e.getCompilationUnit());
-                    makeNodeId.end();
                 }
 
             }

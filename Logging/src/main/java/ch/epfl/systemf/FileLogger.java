@@ -6,193 +6,247 @@ import org.json.JSONObject;
 import org.json.JSONWriter;
 
 import java.io.*;
-import java.lang.ref.WeakReference;
 import java.util.*;
 import java.util.stream.Stream;
 
 public class FileLogger {
 
+    interface JsonSerializable {
+        JSONObject json();
+    }
+
     /*******************************************************
      **************** Event construct ******************
      *******************************************************/
 
+
     /**************
-     ********* Event
+     ********* Group Event
      **************/
 
-    sealed interface GroupEvent {
+    /********
+     **** api
+     ********/
+
+    public static ControlFlow controlFlow() {
+        return new ControlFlow();
+    }
+
+    public static Statment statment() {
+        return new Statment();
+    }
+
+    public static SubStatment subStatment() {
+        return new SubStatment();
+    }
+
+    /********
+     ****  group events definitions
+     ********/
+
+    public enum GroupEventType {
+        ControlFlow("controlFlow"),
+        Statement("statement"),
+        SubStatement("subStatement");
+
+        public final String repr;
+
+        GroupEventType(String repr) {
+            this.repr = repr;
+        }
+    }
+
+    private final static Stack<GroupEvent> eventStack = new Stack<>();
+
+    private static long nextId() {
+        return eventCounter++;
+    }
+
+    private static long eventCounter = 0;
+
+
+    public sealed interface GroupEvent {
         long eventId();
+
+        GroupEventType type();
+
+        static void enter(GroupEvent event) {
+            eventStack.push(event);
+            traceWriter.value(eventRep(event, "start"));
+        }
+
+        static JSONObject eventRep(GroupEvent event, String pos) {
+            return new JSONObject(Map.of(
+                    "type", "GroupEvent",
+                    "pos", pos,
+                    "eventId", event.eventId(),
+                    "eventType", event.type().repr
+            ));
+        }
+
+        static void exit(GroupEvent event) {
+            traceWriter.value(eventRep(event, "end"));
+            GroupEvent top = eventStack.pop();
+            if (!top.equals(event))
+                throw new IllegalStateException();
+        }
     }
 
-    public final class ControlFlow implements GroupEvent {
+
+    public static final class ControlFlow implements GroupEvent {
+        private final long eventId;
+
+        private ControlFlow() {
+            eventId = nextId();
+        }
+
+        public int enter() {
+            GroupEvent.enter(this);
+            return 0;
+        }
+
+        public int exit() {
+            GroupEvent.exit(this);
+            return 0;
+        }
+
         @Override
         public long eventId() {
-            return 0;
+            return eventId;
+        }
+
+        @Override
+        public GroupEventType type() {
+            return GroupEventType.ControlFlow;
         }
     }
 
-    public final class Statment implements GroupEvent {
+    public static final class Statment implements GroupEvent {
+        private final long eventId;
+
+        private Statment() {
+            eventId = nextId();
+        }
+
+        public int enter() {
+            GroupEvent.enter(this);
+            return 0;
+        }
+
+        public int exit() {
+            GroupEvent.exit(this);
+            return 0;
+        }
+
         @Override
         public long eventId() {
-            return 0;
+            return eventId;
+        }
+
+        @Override
+        public GroupEventType type() {
+            return GroupEventType.Statement;
         }
     }
 
-    public final class SubStatment implements GroupEvent {
+
+    public static final class SubStatment implements GroupEvent {
+        private final long eventId;
+
+        private SubStatment() {
+            eventId = nextId();
+        }
+
+        public int enter() {
+            GroupEvent.enter(this);
+            return 0;
+        }
+
+        public int exit() {
+            GroupEvent.exit(this);
+            return 0;
+        }
+
         @Override
         public long eventId() {
-            return 0;
+            return eventId;
+        }
+
+        @Override
+        public GroupEventType type() {
+            return GroupEventType.SubStatement;
         }
     }
-
-    public static sealed abstract class Event {
-        public static int logLabel(EventType type, LabelPos pos, String nodeId, List<Data> data) {
-            long eventId = switch (pos) {
-                case START -> enterEvent();
-                case END -> exitEvent();
-                case CALL -> currentEvent();
-                case UPDATE -> nextId();
-            };
-
-
-            traceWriter.array();
-            pos.serializeToJson(type, new DynamicEventInfo(eventId, nodeId), data).forEach(traceWriter::value);
-            traceWriter.endArray();
-            return 0;
-        }
-
-    }
-
-    public record DynamicEventInfo(long eventId, String nodeId) {
-    }
-
-    public record EventType(String type, String kind) {
-    }
-
-    /********
-     **** simple
-     ********/
-
-    public static final class SimpleFlow extends Event {
-        private static final EventType type = new EventType("flow", "simple");
-
-
-        public static int enter(String nodeId) {
-            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
-        }
-
-        public static int exit(String nodeId) {
-            return Event.logLabel(type, LabelPos.END, nodeId, List.of());
-        }
-    }
-
-    public static final class SimpleStatement extends Event {
-        private static final EventType type = new EventType("statement", "simple");
-
-
-        public static int enter(String nodeId) {
-            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
-        }
-
-        public static int exit(String nodeId, Object result) {
-            return Event.logLabel(type, LabelPos.END, nodeId, List.of(new Result(result)));
-        }
-    }
-
-    public static final class SimpleExpression extends Event {
-        private static final EventType type = new EventType("expression", "simple");
-
-
-        public static int enter(String nodeId) {
-            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
-        }
-
-        public static int exit(String nodeId, Object result) {
-            return Event.logLabel(type, LabelPos.END, nodeId, List.of(new Result(result)));
-        }
-    }
-
-    public static final class Update extends Event {
-        private static final EventType type = new EventType("update", "simple");
-
-
-        public static int writeLocal(String nodeId, String name, Object result) {
-            return Event.logLabel(type, LabelPos.UPDATE, nodeId, List.of(
-                    new Write(new LocalIdentifier("shouldBeParent", name),
-                            result)));
-        }
-
-        public static int writeField(String nodeId, Object owner, String name, Object result) {
-            return Event.logLabel(type, LabelPos.UPDATE, nodeId, List.of(
-                    new Write(new FieldIdentifier(Reference.write(null, owner), name),
-                            result)));
-        }
-    }
-
-    /********
-     **** calls
-     ********/
-
-    public static final class ResultCall extends Event {
-        private static final EventType type = new EventType("statement", "resultCall");
-
-        public static int enter(String nodeId) {
-
-            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
-        }
-
-        //exactly one value of className and owner should be null
-        public static int call(String nodeId, String className, Object owner, Object[] argValues) {
-            Reference ownerRef = Reference.read(className, owner);
-            return Event.logLabel(type, LabelPos.CALL, nodeId, List.of(ownerRef, new ArgsValues(argValues)));
-        }
-
-        public static int exit(String nodeId, Object result) {
-            return Event.logLabel(type, LabelPos.END, nodeId, List.of(new Result(result)));
-        }
-    }
-
-    public static final class VoidCall extends Event {
-        private static final EventType type = new EventType("statement", "callVoid");
-
-        public static int enter(String nodeId) {
-            return Event.logLabel(type, LabelPos.START, nodeId, List.of());
-        }
-
-        //exactly one value of className and owner should be null
-        public static int call(String nodeId, String className, Object owner, Object[] argValues) {
-            Reference ownerRef = Reference.read(className, owner);
-            return Event.logLabel(type, LabelPos.CALL, nodeId, List.of(ownerRef, new ArgsValues(argValues)));
-        }
-
-        public static int exit(String nodeId) {
-            return Event.logLabel(type, LabelPos.END, nodeId, List.of());
-        }
-    }
-
 
     /**************
-     ********* Label pos
+     ********* execution step
      **************/
 
+    /********
+     **** api
+     ********/
 
-    public enum LabelPos {
-        START("start"),
-        UPDATE("update"),
-        CALL("call"),
-        END("end");
+    public static int logSimpleExpression(String nodeKey, Value result, Write[] assigns) {
+        traceWriter.value(new Expression(nodeKey, result, List.of(assigns)).json());
+        return 0;
+    }
 
-        private final String token;
+    public static Call call() {
+        return new Call(0);
+    }
 
-        LabelPos(String token) {
-            this.token = token;
+    public static VoidCall voidCall() {
+        return new VoidCall(0);
+    }
+
+    /********
+     **** Execution step definitions
+     ********/
+
+    public sealed interface ExecutionStep {
+        String ExecutionStep = "ExecutionStep";
+    }
+
+    public record Expression(String nodeKey, Value result, List<Write> assigns) implements ExecutionStep {
+        JSONObject json() {
+            return new JSONObject(Map.of(
+                    "type", ExecutionStep,
+                    "result", result.json(),
+                    "nodeKey", nodeKey,
+                    "assigns", new JSONArray(assigns.stream().map(Write::json).toList())
+            ));
+        }
+    }
+
+    public static final class Call implements ExecutionStep {
+        private final long id;
+
+        private Call(long id) {
+            this.id = id;
         }
 
-        public List<Object> serializeToJson(EventType type, DynamicEventInfo info, List<Data> data) {
-            return Stream.concat(
-                            Stream.of(token, info.eventId, info.nodeId, type.kind, type.type),
-                            data.stream().map(Data::json))
-                    .toList();
+        public int logCall(Value[] argValues) {
+            return 0;
+        }
+
+        public int logReturn(Value result) {
+            return 0;
+        }
+    }
+
+    public static final class VoidCall implements ExecutionStep {
+        private final long id;
+
+        private VoidCall(long id) {
+            this.id = id;
+        }
+
+        public int logCall(Value[] argValues) {
+            return 0;
+        }
+
+        public int logReturn() {
+            return 0;
         }
     }
 
@@ -200,10 +254,10 @@ public class FileLogger {
      **************** File logger ******************
      *******************************************************/
 
-    static class JsonFileWriter implements AutoCloseable{
-        private final  FileWriter  file;
-        private final  BufferedWriter writer;
-        public final  JSONWriter json;
+    static class JsonFileWriter implements AutoCloseable {
+        private final FileWriter file;
+        private final BufferedWriter writer;
+        public final JSONWriter json;
 
         public JsonFileWriter(String fileName) throws IOException {
             file = new FileWriter(fileName);
@@ -222,13 +276,7 @@ public class FileLogger {
      **************** data structures ******************
      *******************************************************/
 
-    private record EventInfo(long eventId) {
-    }
 
-    private static Stack<EventInfo> context = new Stack<>();
-
-
-    private static long eventCounter = 0;
     private final static String traceFileName = "eventTrace.json";
     private final static String objectDataFileName = "objectData.json";
 
@@ -278,38 +326,17 @@ public class FileLogger {
      **************** Data ******************
      *******************************************************/
 
-    public sealed interface Data {
-        Object json();
+    public static Write write(Identifier identifier, Value value) {
+        return new Write(identifier, value);
     }
 
+    public record Write(Identifier identifier, Value value) implements JsonSerializable {
 
-    record Result(Object value) implements Data {
-        @Override
-        public JSONObject json() {
-            return new JSONObject(Map.of(
-                    "dataType", "result",
-                    "result", valueRepr(value)));
-        }
-    }
-
-    record ArgsValues(Object[] argValues) implements Data {
-
-        @Override
-        public JSONObject json() {
-            return new JSONObject(Map.of(
-                    "dataType", "argsValues",
-                    "values", new JSONArray(Arrays.stream(argValues).map(FileLogger::valueRepr).toList())));
-
-        }
-    }
-
-    record Write(Identifier identifier, Object value) implements Data {
-        @Override
         public JSONObject json() {
             return new JSONObject(Map.of(
                     "dataType", "write",
                     "identifier", identifier.json(),
-                    "value", valueRepr(value)));
+                    "value", value.json()));
         }
     }
 
@@ -317,31 +344,56 @@ public class FileLogger {
      **************** Reference ******************
      *******************************************************/
 
+    /********
+     **** api
+     ********/
 
-    public sealed interface Reference extends Data {
-        Map<Object, Integer> versions = new HashMap<>();
 
-        //call if the field of a reference is only read
-        static Reference read(String fullClassName, Object ref) {
-            return reference(fullClassName, ref);
+    // add a mechanism to save object
+    // either on first read or for each write
+    public static InstanceReference readReference(Object obj) {
+        Class<?> clazz = obj.getClass();
+
+        return new InstanceReference(
+                new ClassIdentifier(clazz.getPackageName(), clazz.getSimpleName()),
+                System.identityHashCode(obj),
+                ++InstanceReference.timeStampCounter);
+    }
+
+    public static InstanceReference writeReference(Object obj) {
+        return readReference(obj);
+    }
+
+    /********
+     **** Instance reference definition
+     ********/
+
+
+    //should only be instanced from Reference.read or Reference.write
+    public record InstanceReference(ClassIdentifier clazz, int hashPointer, long timeStamp) implements Value {
+
+        static long timeStampCounter = 0;
+
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "dataType", "instanceRef",
+                    "className", clazz.json(),
+                    "pointer", hashPointer,
+                    "version", timeStamp));
         }
+    }
 
-        //call if we write to the field of a reference
-        //we only save an object when we write to its fields for now, if you want to change it you should also change valueRepr
-        //to avoid infinite loop
-        //Bug : a function that we have not instrumented could return an object then we would not have access to its values
-        static Reference write(String fullClassName, Object ref) {
-            if(ref!=null){
-                versions.put(ref, versions.getOrDefault(ref,0)+1);
-                InstanceReference r = (InstanceReference) reference(fullClassName, ref);
-                saveObject(r, ref);
-                return r;
-            }
-
-            return reference(fullClassName, ref);
+    record ClassIdentifier(String packageName, String className) implements JsonSerializable {
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "packageName", packageName,
+                    "className", className));
         }
+    }
 
-        private static void saveObject(InstanceReference ref, Object obj) {
+    public record ObjectData(InstanceReference self, List<Field> fields) implements JsonSerializable {
+
+        public static void saveObject(InstanceReference ref, Object obj) {
             List<Field> fs = fields(obj.getClass())
                     .map(f -> {
                         try {
@@ -357,86 +409,32 @@ public class FileLogger {
                     })
                     .toList();
             ObjectData data = new ObjectData(ref, fs);
-            objectDataWriter.key(ref.hashPointer+"-"+ref.version);
+            objectDataWriter.key(ref.hashPointer + "-" + ref.timeStamp);
             objectDataWriter.value(data.json());
         }
 
-        record ObjectData(Reference self, List<Field> fields) {
-            public JSONObject json(){
-                return new JSONObject()
-                        .put("self", self.json())
-                        .put("fields", new JSONArray(fields.stream().map(Field::json).toList()));
+
+        //TODO return field from interface but who use static interface fields
+        public static Stream<java.lang.reflect.Field> fields(Class<?> clazz) {
+            if (clazz == null) {
+                return Stream.empty();
+            } else {
+                return Stream.concat(Arrays.stream(clazz.getDeclaredFields()), fields(clazz.getSuperclass()));
             }
         }
 
         record Field(FieldIdentifier identifier, Object value) {
-            public JSONObject json(){
+            public JSONObject json() {
                 return new JSONObject()
                         .put("identifier", identifier.json())
                         .put("value", valueRepr(value));
             }
         }
 
-        //TODO return field from interface but who use static interface fields
-        private static Stream<java.lang.reflect.Field> fields(Class<?> clazz) {
-            if(clazz==null){
-                return Stream.empty();
-            }else{
-                return Stream.concat(Arrays.stream(clazz.getDeclaredFields()), fields(clazz.getSuperclass()));
-            }
-        }
-
-
-
-        private static Reference reference(String fullClassName, Object ref) {
-            if ((fullClassName == null && ref == null) || (fullClassName != null && ref != null)) {
-                throw new IllegalArgumentException();
-            }
-
-            if (fullClassName != null) {
-                int index = fullClassName.lastIndexOf('.');
-                index = index == -1 ? 0 : index;
-                return new StaticReference(
-                        new ClassIdentifier(fullClassName.substring(0, index), fullClassName.substring(index)),
-                        0);
-            } else {
-                Class<?> clazz = ref.getClass();
-
-                return new InstanceReference(
-                        new ClassIdentifier(clazz.getPackageName(), clazz.getSimpleName()),
-                        System.identityHashCode(ref),
-                        versions.getOrDefault(ref,0));
-            }
-        }
-    }
-
-    //should only be instanced from Reference.read or Reference.write
-    record StaticReference(ClassIdentifier clazz, int version) implements Reference {
         public JSONObject json() {
-            return new JSONObject(Map.of(
-                    "dataType", "staticRef",
-                    "className", clazz.json(),
-                    "version", version));
-        }
-    }
-
-    //should only be instanced from Reference.read or Reference.write
-    record InstanceReference(ClassIdentifier clazz, int hashPointer, int version) implements Reference {
-
-        public JSONObject json() {
-            return new JSONObject(Map.of(
-                    "dataType", "instanceRef",
-                    "className", clazz.json(),
-                    "pointer", hashPointer,
-                    "version", version));
-        }
-    }
-
-    record ClassIdentifier(String packageName, String className) {
-        public JSONObject json() {
-            return new JSONObject(Map.of(
-                    "packageName", packageName,
-                    "className", className));
+            return new JSONObject()
+                    .put("self", self.json())
+                    .put("fields", new JSONArray(fields.stream().map(Field::json).toList()));
         }
     }
 
@@ -445,12 +443,34 @@ public class FileLogger {
      **************** Identifier ******************
      *******************************************************/
 
-    public sealed interface Identifier extends Data {
+    /********
+     **** api
+     ********/
+
+
+    public static LocalIdentifier localIdentifier(String parentNodeId, String name) {
+        return new LocalIdentifier(parentNodeId, name);
+    }
+
+    public static StaticIdentifier staticIdentifier(String packageName, String className, String name) {
+        return new StaticIdentifier(new ClassIdentifier(packageName, className), name);
+    }
+
+    public static FieldIdentifier fieldIdentifier(InstanceReference owner, String name) {
+        return new FieldIdentifier(owner, name);
+    }
+
+    /********
+     **** identifier definition
+     ********/
+
+
+    public sealed interface Identifier extends JsonSerializable {
     }
 
     public record LocalIdentifier(String parentNodeId, String name) implements Identifier {
         @Override
-        public Object json() {
+        public JSONObject json() {
             return new JSONObject(Map.of(
                     "dataType", "localIdentifier",
                     "parent", parentNodeId,
@@ -458,9 +478,21 @@ public class FileLogger {
         }
     }
 
-    public record FieldIdentifier(Reference owner, String name) implements Identifier {
+
+    public record StaticIdentifier(ClassIdentifier clazz, String name) implements Identifier {
         @Override
-        public Object json() {
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "dataType", "staticIdentifier",
+                    "clazz", clazz.json(),
+                    "name", name));
+        }
+    }
+
+
+    public record FieldIdentifier(InstanceReference owner, String name) implements Identifier {
+        @Override
+        public JSONObject json() {
             return new JSONObject(Map.of(
                     "dataType", "fieldIdentifier",
                     "owner", owner.json(),
@@ -472,49 +504,42 @@ public class FileLogger {
      **************** Value representation ******************
      *******************************************************/
 
-    private static Object valueRepr(Object value) {
+    /********
+     **** api
+     ********/
+
+
+    public static Value valueRepr(Object value) {
         return switch (value) {
-            case null -> simpleValue("null", "");
-            case Integer i -> simpleValue("int", i);
-            case Long l -> simpleValue("long", l);
-            case Boolean b -> simpleValue("bool", b);
-            case String s -> simpleValue("string", s);
-            case Character c -> simpleValue("char", c);
-            case Byte b -> simpleValue("byte", b);
-            case Short s -> simpleValue("short", s);
-            case Float f -> simpleValue("float", f);
-            case Double d -> simpleValue("double", d);
-            case Object obj -> Reference.read(null, obj).json();
+            case null -> new Literal("null", "");
+            case Integer i -> new Literal("int", i);
+            case Long l -> new Literal("long", l);
+            case Boolean b -> new Literal("bool", b);
+            case String s -> new Literal("string", s);
+            case Character c -> new Literal("char", c);
+            case Byte b -> new Literal("byte", b);
+            case Short s -> new Literal("short", s);
+            case Float f -> new Literal("float", f);
+            case Double d -> new Literal("double", d);
+            case Object obj -> readReference(value);
         };
     }
 
-    private static JSONObject simpleValue(String type, Object value) {
-        return new JSONObject(Map.of("dataType", type, "value", value));
+    /********
+     **** value definition
+     ********/
+
+
+    public sealed interface Value extends JsonSerializable {
     }
 
-    /*******************************************************
-     **************** event id ******************
-     *******************************************************/
+    public record Literal(String type, Object value) implements Value {
 
-    private static long enterEvent() {
-        long id = nextId();
-        context.push(new EventInfo(id));
-        return id;
+        @Override
+        public JSONObject json() {
+            return new JSONObject(Map.of("dataType", type, "value", value));
+        }
     }
 
-    private static long currentEvent() {
-        EventInfo eventInfo = context.peek();
-        return eventInfo.eventId;
-    }
-
-    private static long exitEvent() {
-        EventInfo eventInfo = context.pop();
-        return eventInfo.eventId;
-    }
-
-
-    private static long nextId() {
-        return eventCounter++;
-    }
 
 }

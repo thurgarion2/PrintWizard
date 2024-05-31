@@ -5,6 +5,7 @@ import com.sun.source.tree.LineMap;
 import com.sun.tools.javac.file.PathFileObject;
 import com.sun.tools.javac.tree.EndPosTable;
 import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.tree.TreeScanner;
 import com.sun.tools.javac.util.Position;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -38,8 +39,8 @@ public class SourceFormat {
     /********
      **** fields
      ********/
-    public record SourceFormatDescription(SourceFile sourceFile,
-                                          Map<String, NodeSourceFormat> syntaxNodes) implements JsonSerializable {
+    private record SourceFormatDescription(SourceFile sourceFile,
+                                          Set<NodeSourceFormat> syntaxNodes) implements JsonSerializable {
 
         /********
          **** SourceFormatDescription methods
@@ -51,9 +52,8 @@ public class SourceFormat {
             return new JSONObject(Map.of(
                     "sourceFile", sourceFile.toJson(),
                     "syntaxNodes", new JSONObject(syntaxNodes
-                            .entrySet()
                             .stream()
-                            .collect(Collectors.toMap(entry -> entry.getValue().identifier(), entry -> entry.getValue().toJson()))
+                            .collect(Collectors.toMap(NodeSourceFormat::identifier, JsonSerializable::toJson))
                     )
             ));
         }
@@ -96,7 +96,7 @@ public class SourceFormat {
      **** was not defined in source code
      ********/
 
-    public record AbsentFromSourceCode() implements NodeSourceFormat {
+    private record AbsentFromSourceCode() implements NodeSourceFormat {
 
         @Override
         public JSONObject toJson() {
@@ -114,7 +114,7 @@ public class SourceFormat {
      ********/
 
     //startIndex and endIndex are defined as line:col and should uniquely identify a node
-    public record PresentInSourceCode(List<NodeSourceFormat> children,
+    private record PresentInSourceCode(List<NodeSourceFormat> children,
                                       SourceFormatDescription.SourceFile sourceFile,
                                       int startLine,
                                       int endLine,
@@ -242,7 +242,7 @@ public class SourceFormat {
     private final SourceFormatDescription.SourceFile sourceFile;
 
     // for the cache we could use start and end information
-    private final Map<JCTree, NodeSourceFormat> cache;
+    private final Map<JCTree, NodeSourceFormat> preComputed;
 
 
     public SourceFormat(JCTree.JCCompilationUnit compilationUnit) {
@@ -254,8 +254,6 @@ public class SourceFormat {
         );
 
 
-        this.cache = new HashMap<>();
-
 
         this.source = new SourceCode(applyWithAssert(compilationUnit.getSourceFile(), (path) -> {
             try {
@@ -265,7 +263,23 @@ public class SourceFormat {
             }
         }),
                 compilationUnit.getLineMap());
+
         this.treeNodeToPos = new TreeNodeToPos(compilationUnit.getLineMap(), compilationUnit.endPositions, source);
+        this.preComputed = new HashMap<>();
+        CollectNodeFormat formatCollector = new CollectNodeFormat();
+        formatCollector.scan(compilationUnit);
+
+        SourceFormatDescription description = new SourceFormatDescription(
+                sourceFile,
+                new HashSet<>(preComputed.values()));
+        try (
+                FileWriter f = new FileWriter("source_format.json");
+                BufferedWriter writer = new BufferedWriter(f)
+        ) {
+            description.toJson().write(writer);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static CharSequence applyWithAssert(JavaFileObject o, Function<PathFileObject, CharSequence> f) {
@@ -284,15 +298,13 @@ public class SourceFormat {
      **** create node id
      ********/
     public NodeSourceFormat nodeId(JCTree node) {
-        return nodeId(node, List.of());
+        return preComputed.getOrDefault(node, new AbsentFromSourceCode());
     }
 
     // children should be inside the node
-    public NodeSourceFormat nodeId(JCTree node, List<? extends JCTree> children) {
+    private NodeSourceFormat computeNodeId(JCTree node, List<? extends JCTree> children) {
 
-        if (cache.containsKey(node)) {
-            return cache.get(node);
-        }
+
 
         return switch (treeNodeToPos.pos(node)) {
             case TreeNodeToPos.NotInFile ignored -> new AbsentFromSourceCode();
@@ -351,7 +363,7 @@ public class SourceFormat {
                         pos.startLine + ":" + pos.startCol,
                         pos.endLine + ":" + pos.endCol
                 );
-                cache.put(node, nodeFormat);
+                preComputed.put(node, nodeFormat);
                 yield nodeFormat;
             }
         };
@@ -392,31 +404,6 @@ public class SourceFormat {
 
     }
 
-    /********
-     **** dump NodeFormat to file
-     ********/
-
-
-    public void end() {
-        //there may be duplicate
-        Map<String, NodeSourceFormat> nodes = new HashMap<>();
-        cache.entrySet()
-                .stream()
-                .filter(e -> !(e.getValue() instanceof AbsentFromSourceCode))
-                .forEach(e -> nodes.put(e.getValue().identifier(), e.getValue()));
-
-        SourceFormatDescription description = new SourceFormatDescription(
-                sourceFile,
-                nodes);
-        try (
-                FileWriter f = new FileWriter("source_format.json");
-                BufferedWriter writer = new BufferedWriter(f)
-        ) {
-            description.toJson().write(writer);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
 
     /**************
      ********* translate tree node to a position in the source file
@@ -498,6 +485,26 @@ public class SourceFormat {
                 this.end = end;
                 Assert.assertThat(start <= end);
             }
+        }
+    }
+
+    /*******************************************************
+     **************** visit tree and collect source format ******************
+     *******************************************************/
+
+    // we do it before starting to transform the tree, otherwise it is a mess
+    private class CollectNodeFormat extends TreeScanner {
+
+        @Override
+        public void visitBinary(JCTree.JCBinary tree) {
+            super.visitBinary(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
+        }
+
+        @Override
+        public void visitAssign(JCTree.JCAssign tree) {
+            super.visitAssign(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
         }
     }
 
