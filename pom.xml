@@ -11,9 +11,6 @@
     <modules>
         <module>Logging</module>
         <module>InstrumentationPlugin</module>
-        <!--        <module>RuntimeAgent</module>-->
-<!--        <module>TraceProcessing</module>-->
-<!--        <module>MavenPlugin</module>-->
     </modules>
 
     <properties>

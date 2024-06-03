@@ -56,9 +56,9 @@ Promise.all([initCache()])
     .then(results => {
         let rawTrace = traceCache().data().payload
 
-        debugger;
+       
         const rootEvent = parseEventTrace(rawTrace)
-        debugger;
+       
         
 
 

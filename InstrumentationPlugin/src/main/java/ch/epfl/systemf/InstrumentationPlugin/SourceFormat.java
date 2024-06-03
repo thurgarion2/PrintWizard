@@ -506,6 +506,12 @@ public class SourceFormat {
             super.visitAssign(tree);
             preComputed.put(tree, computeNodeId(tree, List.of()));
         }
+
+        @Override
+        public void visitVarDef(JCTree.JCVariableDecl tree) {
+            super.visitVarDef(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
+        }
     }
 
 }

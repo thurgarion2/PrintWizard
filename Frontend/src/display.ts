@@ -81,15 +81,16 @@ function traceItem(event: EventWithContext<ItemContext, ItemState>): TraceItem {
     function helper(event: EventWithContext<ItemContext, ItemState>): HelperResult {
         let trace: HTMLElement[] = []
         let defaultHidden: HTMLElement[] = []
-        let mainExecutionStep: undefined | HTMLElement = undefined
+        let executionSteps: HTMLElement[] = []
         const codeToHtml = event.kind.type === EventKindTypes.Statement ? statmentCodeToHtml : subStatmentCodeToHtml;
 
         event.executions().forEach(child => {
             switch (child.type) {
                 case 'ExecutionStep':
-                    console.assert(mainExecutionStep === undefined, 'more than 1 execution in an event')
-                    mainExecutionStep = itemToHtml(event.context, event.state.writes, child, codeToHtml)
-                    trace.push(mainExecutionStep)
+
+                    const step = itemToHtml(event.context, event.state.writes, child, codeToHtml)
+                    executionSteps.push(step)
+                    trace.push(step)
                     break;
                 case 'Event':
                     const res = helper(child)
@@ -107,14 +108,9 @@ function traceItem(event: EventWithContext<ItemContext, ItemState>): TraceItem {
                     item: defaultBox(trace),
                     defaultHidden: []
                 }
-            case EventKindTypes.Update:
-                return {
-                    item: empty(),
-                    defaultHidden: []
-                }
             case EventKindTypes.Statement:
-                console.assert(mainExecutionStep !== undefined)
-                offToggleBox(mainExecutionStep,
+                console.assert(executionSteps.length === 1)
+                offToggleBox(executionSteps[0],
                     () => { defaultHidden.forEach(hide) },
                     () => { defaultHidden.forEach(show) })
                 return {
@@ -122,8 +118,7 @@ function traceItem(event: EventWithContext<ItemContext, ItemState>): TraceItem {
                     defaultHidden: []
                 }
             case EventKindTypes.SubStatement:
-                console.assert(mainExecutionStep !== undefined)
-                defaultHidden.push(mainExecutionStep)
+                defaultHidden.push(...executionSteps)
                 return {
                     item: defaultBox(trace),
                     defaultHidden: defaultHidden
@@ -159,8 +154,21 @@ function propagateItemContext(event: Event, ctx: ItemContext): ItemContext {
 
 function aggregateItemState(event: Event, states: ItemState[]): ItemState {
     switch (event.kind.type) {
-        case EventKindTypes.Update:
-            return { writes: event.kind.write ? [event.kind.write] : [] };
+        case EventKindTypes.Statement:
+        case EventKindTypes.SubStatement:
+            
+            const steps: SimpleExpression[] = event.executions()
+                .filter(x => x.type === 'ExecutionStep' && x.kind.type === ExecutionStepTypes.SimpleExpression)
+                .map(x => x.kind) as SimpleExpression[];
+            
+            const writes = steps
+                .map(s => s.assigns)
+                .reduce((acc: Write[], val: Write[]) => acc.concat(val), [])
+            return {
+                writes: states
+                    .map(s => s.writes)
+                    .reduce((acc: Write[], val: Write[]) => acc.concat(val), writes)
+            }
 
         default:
             return {
@@ -360,17 +368,19 @@ type Field = {
 function fieldHtml(field: Field): HTMLElement {
     let item = defaultBox([])
 
-    const inspector = { inspect: (obj : InstanceReference) => { 
-        const key = obj.pointer.toString() + '-' + obj.version.toString()
+    const inspector = {
+        inspect: (obj: InstanceReference) => {
+            const key = obj.pointer.toString() + '-' + obj.version.toString()
 
-        const dataStore = objectDataCache().data()
-        if(dataStore.type==='success'){
-            const data = dataStore.payload[key]
-            if(data!==undefined){
-                item.append(objectHtml(data))
+            const dataStore = objectDataCache().data()
+            if (dataStore.type === 'success') {
+                const data = dataStore.payload[key]
+                if (data !== undefined) {
+                    item.append(objectHtml(data))
+                }
             }
         }
-    } }
+    }
 
 
     item.append(...[

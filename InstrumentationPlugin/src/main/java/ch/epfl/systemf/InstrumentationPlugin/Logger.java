@@ -31,6 +31,7 @@ public class Logger {
     private static final TreeHelper.SimpleClass FILE_Logger = new TreeHelper.SimpleClass(FILE_LOGGER_PACKAGE, FILE_LOGGER_CLAZZ);
 
     public enum FileLoggerSubClasses {
+        TryCatch("TryCatch"),
         ControlFlow("ControlFlow"),
         Statment("Statment"),
         SubStatment("SubStatment"),
@@ -59,6 +60,15 @@ public class Logger {
     /**************
      ********* Group Event
      **************/
+
+    public JCTree.JCExpression tryCatch() {
+        return helper.callStaticMethod(
+                FILE_Logger,
+                "tryCatch",
+                List.nil(),
+                helper.type(FileLoggerSubClasses.TryCatch.clazz),
+                List.nil());
+    }
 
     public JCTree.JCExpression controlFlow() {
         return helper.callStaticMethod(
@@ -216,6 +226,18 @@ public class Logger {
     /**************
      ********* group events instance methods
      **************/
+
+    public JCTree.JCExpression groupMethod(String name, Symbol clazzInstance, TreeHelper.SimpleClass clazz) {
+
+        return helper.callInstanceMethod(
+                mkTree.Ident(clazzInstance),
+                clazz,
+                name,
+                List.nil(),
+                helper.intP,
+                List.nil()
+        );
+    }
 
     public JCTree.JCExpression enter(Symbol clazzInstance, TreeHelper.SimpleClass clazz) {
 

@@ -32,6 +32,10 @@ public class FileLogger {
         return new ControlFlow();
     }
 
+    public static TryCatch tryCatch() {
+        return new TryCatch();
+    }
+
     public static Statment statment() {
         return new Statment();
     }
@@ -84,6 +88,13 @@ public class FileLogger {
             ));
         }
 
+        static void exitUpTo(GroupEvent event){
+            while(!eventStack.peek().equals(event)){
+                exit(eventStack.pop());
+            }
+            exit(event);
+        }
+
         static void exit(GroupEvent event) {
             traceWriter.value(eventRep(event, "end"));
             GroupEvent top = eventStack.pop();
@@ -91,6 +102,10 @@ public class FileLogger {
                 throw new IllegalStateException();
         }
     }
+
+    /********
+     ****  Control Flow
+     ********/
 
 
     public static final class ControlFlow implements GroupEvent {
@@ -121,6 +136,42 @@ public class FileLogger {
         }
     }
 
+    /********
+     ****  Try catch
+     ********/
+
+
+    public static final class TryCatch {
+        private final ControlFlow tryFlow = new ControlFlow();
+        private final ControlFlow catchFlow = new ControlFlow();
+
+
+        public int enterTry() {
+            GroupEvent.enter(tryFlow);
+            return 0;
+        }
+
+        public int exitTry() {
+            GroupEvent.exit(tryFlow);
+            return 0;
+        }
+
+        public int enterCatch() {
+            GroupEvent.exitUpTo(TryCatch.this.tryFlow);
+            GroupEvent.enter(catchFlow);
+            return 0;
+        }
+
+        public int exitCatch() {
+            GroupEvent.exit(catchFlow);
+            return 0;
+        }
+    }
+
+    /********
+     ****  Statment
+     ********/
+
     public static final class Statment implements GroupEvent {
         private final long eventId;
 
@@ -149,6 +200,9 @@ public class FileLogger {
         }
     }
 
+    /********
+     ****  SubStatment
+     ********/
 
     public static final class SubStatment implements GroupEvent {
         private final long eventId;
@@ -211,6 +265,7 @@ public class FileLogger {
         JSONObject json() {
             return new JSONObject(Map.of(
                     "type", ExecutionStep,
+                    "kind", "expression",
                     "result", result.json(),
                     "nodeKey", nodeKey,
                     "assigns", new JSONArray(assigns.stream().map(Write::json).toList())

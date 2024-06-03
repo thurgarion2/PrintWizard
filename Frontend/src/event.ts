@@ -17,7 +17,6 @@ export {
     LocalIdentifier,
     Literal,
     FieldIdentifier,
-    LabelPos,
     Result,
     EventKind,
     DataType,
@@ -61,13 +60,12 @@ interface Event {
 **** different event kinds
 ********/
 
-type EventKind = Statement | SubStatement | ControlFlow | Update
+type EventKind = Statement | SubStatement | ControlFlow
 
 enum EventKindTypes {
     Statement = "statement",
     SubStatement = "subStatement",
-    Flow = "flow",
-    Update = "update"
+    Flow = "flow"
 }
 
 /********
@@ -89,17 +87,12 @@ type ControlFlow = {
     type: EventKindTypes.Flow
 }
 
-// update are leaf nodes and don't have any execution statement inside
-type Update = {
-    type: EventKindTypes.Update,
-    write: Write
-}
 
 /********
 **** events constructor
 ********/
 
-function makeEvent(execution :  Execution[], kind : EventKind): Event {
+function makeEvent(execution: Execution[], kind: EventKind): Event {
     return {
         type: 'Event',
         executions: () => execution,
@@ -137,7 +130,8 @@ enum ExecutionStepTypes {
 
 type SimpleExpression = {
     type: ExecutionStepTypes.SimpleExpression,
-    result: Value
+    result: Value,
+    assigns: Write[]
 }
 
 
@@ -171,9 +165,9 @@ function makeExecutionStep(nodeId: NodeSourceFormat, kind: ExecutionStepType): E
 
 
 function parseEventTrace(jsonTrace: any[]): Event {
-    const labels = parseRawLabels(jsonTrace)
-    const [root, notUsed] = parseEvent(labels, 0)
-    
+    const steps = parseSteps(jsonTrace)
+    const [root, notUsed] = parseEvent(steps, 0)
+
     return root;
 }
 
@@ -185,10 +179,6 @@ function parseEventTrace(jsonTrace: any[]): Event {
 **** types
 ********/
 
-type EventState = {
-    state: Map<LabelPos, Data[]>,
-    nodeId: NodeSourceFormat
-}
 
 /********
 **** create Execution Step function
@@ -196,86 +186,71 @@ type EventState = {
 
 // code is a bit ugly as I have not yet change the json format to reflect 
 // the change in the Event format
-function parseEvent(labels : RawLabel[], startIndex : number):[Event,number]{
-    const startLabel = labels[startIndex];
-    if(startLabel===undefined)
-        debugger;
+function parseEvent(labels: RawStep[], startIndex: number): [Event, number] {
 
-    if(startLabel.pos===LabelPos.UPDATE){
-        console.assert(startLabel.data.length===1)
-
-        return [makeEvent([], {
-            type: EventKindTypes.Update,
-            write: startLabel.data[0] as Write
-        }), startIndex]
-    }
-
-    let executions : any[] = []
-    let state : EventState = {
-        state: new Map(),
-        nodeId: startLabel.instanceInfo.nodeId
-    }
-
-    state.state.set(startLabel.pos, startLabel.data)
-
-    executions.push(labelToExecutionStep(startLabel.pos, startLabel.eventDescription))
-
-    let index = startIndex+1
-    let currentLabel = labels[index]
+    const startStep = labels[startIndex]
+    if (startStep.type !== StepType.GroupEvent)
+        return unableToParse(startStep)
 
 
+    let children: Execution[] = []
+    const eventId: number = startStep.fields.get('eventId')
+    console.assert(typeof eventId === 'number')
+    console.assert(startStep.fields.get('pos') === 'start')
 
-    while(currentLabel.pos!==LabelPos.END){
+    let index = startIndex + 1
+    let current = labels[index]
 
-        switch(currentLabel.pos){
-            case LabelPos.CALL:
-                state.state.set(currentLabel.pos, currentLabel.data)
-                executions.push(labelToExecutionStep(currentLabel.pos, currentLabel.eventDescription))
+    while (current.type !== StepType.GroupEvent || current.fields.get('pos') !== 'end') {
+        if (current.type === StepType.ExecutionStep) {
+            switch (current.fields.get('kind')) {
+                case 'expression':
 
-                index = index +1
-                currentLabel = labels[index]
-                break;
-            case LabelPos.UPDATE:
-            case LabelPos.START:
-                let [event, endIndex] : [Event, number] = parseEvent(labels, index)
-                index = endIndex +1
-                currentLabel = labels[index]
-               
-                executions.push(event)
+                    children.push(
+                        makeExecutionStep(
+                            findNodeSynthax(current.fields.get('nodeKey')),
+                            {
+                                type: ExecutionStepTypes.SimpleExpression,
+                                result: valueFromJson(current.fields.get('result')),
+                                assigns: current.fields.get('assigns').map(dataFromJson) as Write[]
+                            }
+                        )
+                    )
+                    break;
+                default:
+                    debugger;
+                    throw new Error("unspported");
+            }
+            index = index + 1
+            current = labels[index]
+            continue;
+        }
+
+        if (current.type === StepType.GroupEvent) {
+            let [event, endIndex] = parseEvent(labels, index)
+            children.push(event)
+
+            index = endIndex + 1
+            current = labels[index]
+            continue;
         }
     }
 
-    state.state.set(currentLabel.pos, currentLabel.data)
-    executions.push(labelToExecutionStep(currentLabel.pos, currentLabel.eventDescription))
+   
     
+    console.assert(current.fields.get('pos') === 'end')
+    console.assert(current.fields.get('eventId') === eventId)
 
-    executions = executions.map((x : any) => {
-        if(x.type==='Event'){
-            return x;
-        }else{
-            return x(state)
-        }
-    }).filter(x => x!==undefined)
-
-    let eventType : EventKind
-
-    switch(currentLabel.eventDescription.kind){
-        case 'expression':
-            eventType = {type : EventKindTypes.SubStatement}
-            break;
-        case 'flow':
-            eventType = {type : EventKindTypes.Flow}
-            break;
-        case 'statement':
-            eventType = {type : EventKindTypes.Statement}
-            break;
+    switch (current.fields.get('eventType')) {
+        case "controlFlow":
+            return [makeEvent(children, { type: EventKindTypes.Flow }), index];
+        case "statement":
+            return [makeEvent(children, { type: EventKindTypes.Statement }), index];
+        case "subStatement":
+            return [makeEvent(children, { type: EventKindTypes.SubStatement }), index];
         default:
-            debugger;
-            throw new Error('unhandled case')
+            throw new Error("unspported");
     }
-
-
-    return [makeEvent(executions, eventType), index]
 }
 
 
@@ -283,65 +258,7 @@ function parseEvent(labels : RawLabel[], startIndex : number):[Event,number]{
 **** create Execution Step function
 ********/
 
-function labelToExecutionStep(pos: LabelPos, eventDescription: EventType): (state: EventState) => (ExecutionStep | undefined) {
-    // should be a big match but not supported in javascript :(
-   
-    switch (pos) {
-        case LabelPos.CALL:
-            if (eventDescription.subkind === 'resultCall') {
-               
-                return (state: EventState) => {
-                    let res = state.state.get(LabelPos.END)
-                    let args = state.state.get(LabelPos.CALL)
 
-                    console.assert(res.length === 0 || res.length === 1)
-                    console.assert(args.length === 0 || args.length === 2)
-
-                   
-                    return makeExecutionStep(state.nodeId, {
-                        type: ExecutionStepTypes.Call,
-                        argVaules: (extractFromArray(args, 1) as ArgsValues).values,
-                        result: (extractFromArray(res, 0) as Result).value
-                    })
-                }
-            }
-
-            if (eventDescription.subkind === 'callVoid') {
-               
-                return (state: EventState) => {
-                    let args = state.state.get(LabelPos.CALL)
-                    console.assert(args.length === 0 || args.length === 2)
-                   
-                    return makeExecutionStep(state.nodeId, {
-                        type: ExecutionStepTypes.VoidCall,
-                        argVaules: (extractFromArray(args, 1) as ArgsValues).values
-                    })
-                }
-            }
-            break;
-        case LabelPos.END:
-            if ((eventDescription.kind === 'expression' || eventDescription.kind === 'statement')
-                && eventDescription.subkind === 'simple') {
-                
-               
-                return (state: EventState) => {
-                    let res = state.state.get(LabelPos.END)
-
-                    console.assert(res.length === 0 || res.length === 1)
-                   
-                    return makeExecutionStep(state.nodeId, {
-                        type: ExecutionStepTypes.SimpleExpression,
-                        result: (extractFromArray(res, 0) as Result).value
-                    })
-                }
-            }
-        case LabelPos.UPDATE:
-        case LabelPos.START:
-            return (state: EventState) => undefined
-    }
-
-    throw new Error('case not covered');
-}
 
 function extractFromArray(data: Data[], index: number) {
     if (data.length === 0) {
@@ -360,77 +277,54 @@ function extractFromArray(data: Data[], index: number) {
 **** types
 ********/
 
-type RawLabel = {
-    pos: LabelPos,
-    instanceInfo: InstanceInfo,
-    eventDescription: EventType,
-    data: Data[]
+type RawStep = {
+    type: StepType,
+    fields: Map<string, any>
 }
 
-type EventType = {
-    kind: string,
-    subkind: string
-}
 
-type EventId = { id: number }
 
-type InstanceInfo = {
-    eventId: EventId,
-    nodeId: NodeSourceFormat
-}
-
-enum LabelPos {
-    START = "start",
-    UPDATE = "update",
-    END = "end",
-    CALL = "call"
+enum StepType {
+    ExecutionStep = "ExecutionStep",
+    GroupEvent = "GroupEvent",
 }
 
 /********
 ****  parsing functions
 ********/
 
-function parseRawLabels(jsonTrace: any): RawLabel[] {
-    return jsonTrace["trace"].map(parseRawLabel)
+function parseSteps(jsonTrace: any): RawStep[] {
+    return jsonTrace["trace"].map(parseStep)
 }
 
-const startIndexData = 5
+const TypeField = 'type'
 
-function parseRawLabel(json: any): RawLabel {
+function parseStep(json: any): RawStep {
 
-    return {
-        pos: labelPosFromJson(json),
-        instanceInfo: instanceInfoFromJson(json),
-        eventDescription: eventTypeFromJson(json),
-        data: json.slice(startIndexData, json.length).map(dataFromJson)
-    }
-}
-
-function eventTypeFromJson(json: any[]): EventType {
-    const kind = readArrayField(4, json)
-    const subkind = readArrayField(3, json)
-    const t = { kind: kind, subkind: subkind }
-    return t
-}
-
-function instanceInfoFromJson(json: any[]): InstanceInfo {
-    const eventId = { id: Number(readArrayField(1, json)) }
-    const nodeId = readArrayField(2, json)
-
-    return {
-        eventId: eventId,
-        nodeId: findNodeSynthax(nodeId)
-    }
-}
-
-const PosValues = Object.keys(LabelPos).map(key => (LabelPos as any)[key])
-
-function labelPosFromJson(json: any): LabelPos {
-    const labelPos = json[0]
-    if (PosValues.includes(labelPos)) {
-        return labelPos
-    } else {
+    if (!(TypeField in json))
         return unableToParse(json)
+
+    let fields = new Map();
+    Object.keys(json)
+        .filter(field => field !== TypeField)
+        .forEach(field => fields.set(field, json[field]))
+
+    return {
+        type: typeFromString(json[TypeField]),
+        fields: fields
+    }
+}
+
+
+
+const PosValues = Object.keys(StepType).map(key => (StepType as any)[key])
+
+function typeFromString(stepType: any): StepType {
+
+    if (PosValues.includes(stepType)) {
+        return stepType
+    } else {
+        return unableToParse(stepType);
     }
 }
 
