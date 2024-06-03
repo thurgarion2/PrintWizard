@@ -10,7 +10,7 @@ public class BasicOperation {
         try{
             int i = 0;
             throw new IllegalStateException("illegal");
-        }catch (IllegalStateException state){
+        }catch (IllegalArgumentException state){
             int k = 10;
             System.out.println("hello");
         }

@@ -90,9 +90,15 @@ public class FileLogger {
 
         static void exitUpTo(GroupEvent event){
             while(!eventStack.peek().equals(event)){
-                exit(eventStack.pop());
+                exit(eventStack.peek());
             }
             exit(event);
+        }
+
+        static void exitAll() {
+           while(!eventStack.empty()){
+               exit(eventStack.peek());
+           }
         }
 
         static void exit(GroupEvent event) {
@@ -363,6 +369,8 @@ public class FileLogger {
         objectDataWriter.object();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            GroupEvent.exitAll();
+            
             try {
                 traceWriter.endArray();
                 traceWriter.endObject();
