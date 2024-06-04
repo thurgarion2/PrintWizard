@@ -11,6 +11,7 @@
     <modules>
         <module>Logging</module>
         <module>InstrumentationPlugin</module>
+        <module>IntegrationTest</module>
     </modules>
 
     <properties>

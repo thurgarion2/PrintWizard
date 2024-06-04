@@ -1,4 +1,4 @@
-mvn clean install
+##mvn clean install
 javac -processorpath ./InstrumentationPlugin/target/classes \
   -g \
   -Xplugin:MyPlugin \
