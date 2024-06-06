@@ -1,5 +1,6 @@
 package ch.epfl.systemf.InstrumentationPlugin;
 
+import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree;
@@ -7,6 +8,7 @@ import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.tree.TreeTranslator;
 import com.sun.tools.javac.util.List;
 
+import java.lang.invoke.MethodType;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Stack;
@@ -34,6 +36,9 @@ public class TreeInstrumenter extends TreeTranslator {
     private final TreeHelper.SimpleClass SubStatement = Logger.FileLoggerSubClasses.SubStatment.clazz;
     private final Type subStatementType;
 
+    private final TreeHelper.SimpleClass Value = Logger.FileLoggerSubClasses.Value.clazz;
+    private final Type valueType;
+
 
     public TreeInstrumenter(Logger logHelper, TreeHelper helper, SourceFormat makeNodeId) {
         super();
@@ -45,20 +50,36 @@ public class TreeInstrumenter extends TreeTranslator {
         subStatementType = helper.type(SubStatement);
         flowType = helper.type(Flow);
         callType = helper.type(CALL);
+        valueType = helper.type(Value);
     }
 
     /*******************************************************
      **************** context definition ******************
      *******************************************************/
 
-    private static class Context {
+    private class Context {
         private final Stack<MethodContext> methodStack = new Stack<>();
 
-        public record MethodContext(JCTree.JCMethodDecl method, Symbol.VarSymbol methodEventGroup) {
+        public record MethodContext(Symbol.MethodSymbol methodSymbol, Symbol.VarSymbol methodEventGroup) {
         }
 
-        public void enterMethod(JCTree.JCMethodDecl method, Symbol.VarSymbol methodEventGroup) {
-            methodStack.push(new MethodContext(method, methodEventGroup));
+        public Symbol.VarSymbol enterLambda() {
+            // TODO search for return value of single method, otherwise we will have problems
+            Symbol.VarSymbol methodEventGroup = new Symbol.VarSymbol(0,
+                    helper.name("||||" + (symbolNumber++)),
+                    flowType,
+                    this.currentMethod().methodSymbol);
+            methodStack.push(new MethodContext(this.currentMethod().methodSymbol, methodEventGroup));
+            return methodEventGroup;
+        }
+
+        public Symbol.VarSymbol enterMethod(Symbol.MethodSymbol methodSymbol) {
+            Symbol.VarSymbol methodEventGroup = new Symbol.VarSymbol(0,
+                    helper.name("||||" + (symbolNumber++)),
+                    flowType,
+                    methodSymbol);
+            methodStack.push(new MethodContext(methodSymbol, methodEventGroup));
+            return methodEventGroup;
         }
 
         public void exitMethod() {
@@ -68,11 +89,42 @@ public class TreeInstrumenter extends TreeTranslator {
         public MethodContext currentMethod() {
             return methodStack.peek();
         }
+
+        public boolean isTop() {
+            return methodStack.empty();
+        }
     }
+
 
     /*******************************************************
      **************** visit node ******************
      *******************************************************/
+    @Override
+    public void visitClassDef(JCTree.JCClassDecl tree) {
+        //TODO we don't support when several classes are defined in the same file (we support inner classes)
+        List<JCTree> translated = List.nil();
+        for (JCTree def : tree.defs) {
+            switch (def) {
+                case JCTree.JCClassDecl clazz:
+                    translated = translated.append(translate(clazz));
+                    break;
+                case JCTree.JCMethodDecl meth:
+                    translated = translated.append(translate(meth));
+                    break;
+                case JCTree.JCVariableDecl decl:
+                    // to use let expression you need to in a method def
+                    // we need some trick
+                    // TODO create function that take the result return it and log an executionStep
+                    translated = translated.append(decl);
+                    break;
+                default:
+                    throw new UnsupportedOperationException();
+            }
+        }
+        tree.defs = translated;
+        this.result = tree;
+    }
+
 
     @Override
     public void visitAnnotatedType(JCTree.JCAnnotatedType tree) {
@@ -81,22 +133,52 @@ public class TreeInstrumenter extends TreeTranslator {
     }
 
     @Override
-    public void visitAnnotation(JCTree.JCAnnotation tree) {
-        System.out.println("visitAnnotation");
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public void visitApply(JCTree.JCMethodInvocation tree) {
-        //TODO Instrument
         super.visitApply(tree);
+        this.result = logExecutionStep((JCTree.JCMethodInvocation) this.result);
     }
 
     @Override
     public void visitExec(JCTree.JCExpressionStatement tree) {
-        if (tree.expr instanceof JCTree.JCMethodInvocation call && call.type.equals(helper.voidP)) {
-            //TODO instrument
-            super.visitExec(tree);
+        if (tree.expr instanceof JCTree.JCMethodInvocation call && (call.type==null || call.type.equals(helper.voidP))) {
+            SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(call);
+
+            super.visitApply((JCTree.JCMethodInvocation) tree.expr);
+            JCTree.JCMethodInvocation transCall = (JCTree.JCMethodInvocation) this.result;
+            Type.MethodType callType = (Type.MethodType) transCall.meth.type;
+            tree.expr = transCall;
+
+            String statement = "stat";
+            String subStatement = "sub";
+            String callEvent = "call";
+
+            StatementSequenceWithoutBlock builder = makeStatementSequence();
+            builder.executeAndBind(statement, (ignored) -> logHelper.statment(), statementType);
+            builder.executeAndBind(subStatement, (ignored) -> logHelper.subStatment(), subStatementType);
+            builder.execute((binds) -> logHelper.enter(binds.get(statement), Statement));
+            builder.execute((binds) -> logHelper.enter(binds.get(subStatement), SubStatement));
+
+            List<String> argNames = List.from(IntStream.range(0, transCall.args.size())
+                    .mapToObj(i -> "arg" + i).toList());
+
+            IntStream.range(0, transCall.args.size()).forEach(i ->
+                    builder.executeAndBind(argNames.get(i), (ignored) -> transCall.args.get(i), callType.getParameterTypes().get(i))
+            );
+
+            this.result = builder
+                    .execute((binds) -> logHelper.exit(binds.get(subStatement), SubStatement))
+                    .executeAndBind(callEvent, (ignored) -> logHelper.voidCall(format), helper.type(Logger.FileLoggerSubClasses.VoidCall.clazz))
+                    .execute((binds) -> {
+                        List<Logger.Value> values = argNames.map(name -> logHelper.valueRepr(mkTree.Ident(binds.get(name))));
+                        return logHelper.logVoidCall(binds.get(callEvent), values);
+                    })
+                    .execute((binds) -> {
+                        transCall.args = argNames.map(name -> mkTree.Ident(binds.get(name)));
+                        return transCall;
+                    })
+                    .execute((binds) -> logHelper.exit(binds.get(statement), Statement))
+                    .block(mkTree.Block(0, List.nil()))
+                    .build();
         } else {
             tree.expr = visitStatement(tree.expr);
             this.result = tree;
@@ -112,8 +194,7 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitAssignop(JCTree.JCAssignOp tree) {
         super.visitAssignop(tree);
-        System.out.println("visitAssignop --- TODO");
-        throw new UnsupportedOperationException();
+        this.result = logExecutionStep((JCTree.JCAssignOp) this.result);
     }
 
     @Override
@@ -132,7 +213,7 @@ public class TreeInstrumenter extends TreeTranslator {
     public void visitConditional(JCTree.JCConditional tree) {
         super.visitConditional(tree);
         System.out.println("visitConditional --- TODO");
-        //TODO
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -144,8 +225,17 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitDoLoop(JCTree.JCDoWhileLoop tree) {
         super.visitDoLoop(tree);
-        //TODO
-        System.out.println("visitDoLoop --- TODO");
+        JCTree.JCDoWhileLoop loop = (JCTree.JCDoWhileLoop) this.result;
+
+        String flowEvent = "flow";
+
+        assertBlock(loop.body);
+        loop.body = makeStatementSequence()
+                .executeAndBind(flowEvent, (notUsed) -> logHelper.controlFlow(), flowType)
+                .execute((binds) -> logHelper.enter(binds.get(flowEvent), Flow))
+                .block((JCTree.JCBlock) loop.body)
+                .execute((binds) -> logHelper.exit(binds.get(flowEvent), Flow))
+                .build();
     }
 
     @Override
@@ -157,8 +247,7 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitForeachLoop(JCTree.JCEnhancedForLoop tree) {
         super.visitForeachLoop(tree);
-        System.out.println("visitForeachLoop --- TODO");
-        //TODO
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -173,18 +262,32 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitIf(JCTree.JCIf tree) {
-        throw new UnsupportedOperationException();
-//        tree.cond = visitStatement(tree.cond);
-//        tree.thenpart = translate(tree.thenpart);
-//
-//        if (tree.elsepart instanceof JCTree.JCIf treeIf) {
-//            visitIf(treeIf);
-//
-//
-//        } else {
-//            tree.elsepart = translate(tree.elsepart);
-//
-//        }
+        tree.cond = visitStatement(tree.cond);
+        tree.thenpart = handleBranch(tree.thenpart);
+
+        if(tree.elsepart==null){
+            this.result = tree;
+            return;
+        }
+
+
+        if (tree.elsepart instanceof JCTree.JCIf treeIf) {
+            visitIf(treeIf);
+
+        } else {
+            tree.elsepart = handleBranch(tree.elsepart);
+        }
+        this.result = tree;
+    }
+
+    private JCTree.JCStatement handleBranch(JCTree.JCStatement branch){
+        JCTree.JCStatement block = branch;
+        if(!(branch instanceof JCTree.JCBlock)){
+            block = mkTree.Block(0, List.of(branch));
+        }
+        return  makeStatementSequence()
+                .flow(this, (JCTree.JCBlock) translate(block))
+                .build();
     }
 
     @Override
@@ -201,22 +304,56 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitLambda(JCTree.JCLambda tree) {
-        System.out.println("visitLambda");
-        throw new UnsupportedOperationException();
+
+        Symbol.VarSymbol flowSymbol =   context.enterLambda();
+
+
+        super.visitLambda(tree);
+
+        JCTree.JCLambda lambda = (JCTree.JCLambda) this.result;
+
+        if(lambda.body instanceof JCTree.JCExpression expr && expr.type.equals(helper.voidP))
+            lambda.body = mkTree.Block(0, List.of(mkTree.Exec(expr)));
+
+        String flowEvent = "flow";
+
+        switch (lambda.body){
+            case JCTree.JCBlock block:
+                lambda.body = makeStatementSequence()
+                        .executeAndBind(flowEvent, flowSymbol, (notUsed) -> logHelper.controlFlow())
+                        .execute((binds) -> logHelper.enter(binds.get(flowEvent), Flow))
+                        .block(block)
+                        .execute((binds) -> logHelper.exit(binds.get(flowEvent), Flow))
+                        .build();
+                break;
+            case JCTree.JCExpression expr:
+                assertThat(!expr.type.equals(helper.voidP), "should not be void");
+                lambda.body = makeExpressionSequence()
+                        .executeAndBind(flowEvent, (ignored)->logHelper.controlFlow(), flowType)
+                        .execute((binds)->logHelper.enter(binds.get(flowEvent), Flow))
+                        .executeAndReturn("-", (ignored)->expr, lambda.type)
+                        .execute((binds)->logHelper.exit(binds.get(flowEvent), Flow))
+                        .build();
+                break;
+            default:
+                throw new UnsupportedOperationException();
+
+        }
+
+
+        context.exitMethod();
     }
 
     @Override
     public void visitMethodDef(JCTree.JCMethodDecl tree) {
-        StatementSequenceWithoutBlock builder = makeStatementSequence(tree.sym);
-        Symbol.VarSymbol flowSymbol = builder.newSymbol(flowType);
-        context.enterMethod(tree, flowSymbol);
+        Symbol.VarSymbol flowSymbol = context.enterMethod(tree.sym);
 
         super.visitMethodDef(tree);
 
         JCTree.JCMethodDecl method = (JCTree.JCMethodDecl) this.result;
 
         String flowEvent = "flow";
-        method.body = builder
+        method.body = makeStatementSequence()
                 .executeAndBind(flowEvent, flowSymbol, (notUsed) -> logHelper.controlFlow())
                 .execute((binds) -> logHelper.enter(binds.get(flowEvent), Flow))
                 .block(method.body)
@@ -234,6 +371,8 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitNewClass(JCTree.JCNewClass tree) {
+        SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(tree);
+
         super.visitNewClass(tree);
         JCTree.JCNewClass newClass = (JCTree.JCNewClass) this.result;
 
@@ -249,7 +388,7 @@ public class TreeInstrumenter extends TreeTranslator {
                     (notUsed) -> newClass.args.get(finalI),
                     newClass.constructorType.getParameterTypes().get(i));
         }
-        this.result = builder.executeAndBind(callName, (notUsed) -> logHelper.call(), callType)
+        this.result = builder.executeAndBind(callName, (notUsed) -> logHelper.call(format), callType)
                 .execute((binds) -> logHelper.logCall(
                         binds.get(callName),
                         argsName.map(name -> logHelper.valueRepr(mkTree.Ident(binds.get(name))))))
@@ -273,33 +412,30 @@ public class TreeInstrumenter extends TreeTranslator {
     }
 
     @Override
+    public void visitAssert(JCTree.JCAssert tree) {
+        SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(tree);
+
+        super.visitAssert(tree);
+
+        JCTree.JCAssert ass = (JCTree.JCAssert) this.result;
+
+        String res = "res";
+        ass.cond = visitStatement(ass.cond);
+    }
+
+    @Override
     public void visitReturn(JCTree.JCReturn tree) {
         SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(tree);
 
-        tree.expr = visitStatement(tree.expr);
+        if(tree.expr!=null){
+            tree.expr = visitStatement(tree.expr);
+            tree.expr = makeExpressionSequence()
+                    .executeAndReturn("-", (notUsed) -> tree.expr, context.currentMethod().methodSymbol.getReturnType())
+                    .execute((notUsed) -> logHelper.exit(context.currentMethod().methodEventGroup, Flow))
+                    .build();
+        }
 
-        String statementEvent = "statementEvent";
-        String subStatement = "subStatement";
-        String result = "res";
-
-        tree.expr = makeExpressionSequence()
-                .executeAndBind(statementEvent, (notUsed) -> logHelper.statment(), statementType)
-                .execute((binds) -> logHelper.enter(binds.get(statementEvent), Statement))
-                .executeAndReturn("-", (noUsed) ->
-                                makeExpressionSequence()
-                                        .executeAndBind(subStatement, (notUsed) -> logHelper.subStatment(), subStatementType)
-                                        .execute((binding) -> logHelper.enter(binding.get(subStatement), SubStatement))
-                                        .executeAndReturn(result, (notUsed) -> tree.expr, tree.type)
-                                        .execute((binding) -> logHelper.exit(binding.get(subStatement), SubStatement))
-                                        .execute((binding) -> {
-                                            Logger.Value value = logHelper.valueRepr(mkTree.Ident(binding.get(result)));
-                                            return logHelper.logSimpleExpression(format, value, List.nil());
-                                        })
-                                        .build()
-                        , tree.type)
-                .execute((binds) -> logHelper.exit(binds.get(statementEvent), Statement))
-                .execute((binds) -> logHelper.exit(context.currentMethod().methodEventGroup, Flow))
-                .build();
+        this.result = tree;
     }
 
     @Override
@@ -346,7 +482,7 @@ public class TreeInstrumenter extends TreeTranslator {
         String catchFlow = "catch";
         TreeHelper.SimpleClass TRY = Logger.FileLoggerSubClasses.TryCatch.clazz;
         Type tryType = helper.type(TRY);
-        Symbol.VarSymbol tryClass = new Symbol.VarSymbol(0, helper.name("----try"), tryType, context.currentMethod().method.sym);
+        Symbol.VarSymbol tryClass = new Symbol.VarSymbol(0, helper.name("----try"), tryType, context.currentMethod().methodSymbol);
 
         //TODO what about resources
         //TODO support finally
@@ -372,12 +508,6 @@ public class TreeInstrumenter extends TreeTranslator {
     @Override
     public void visitTypeBoundKind(JCTree.TypeBoundKind tree) {
         System.out.println("visitTypeBoundKind");
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void visitTypeCast(JCTree.JCTypeCast tree) {
-        System.out.println("visitTypeCast");
         throw new UnsupportedOperationException();
     }
 
@@ -413,6 +543,8 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitVarDef(JCTree.JCVariableDecl tree) {
+        assertThat(!context.isTop(), "we should not call this method if the variable is defined at the level of the class");
+
         SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(tree);
         super.visitVarDef(tree);
         //we are in a method parameter
@@ -421,7 +553,7 @@ public class TreeInstrumenter extends TreeTranslator {
 
             String statementEvent = "statementEvent";
             String subStatement = "subStatement";
-            String result = "res";
+            String resultVar = "res";
 
             tree.init = makeExpressionSequence()
                     .executeAndBind(statementEvent, (notUsed) -> logHelper.statment(), statementType)
@@ -430,11 +562,11 @@ public class TreeInstrumenter extends TreeTranslator {
                                     makeExpressionSequence()
                                             .executeAndBind(subStatement, (notUsed) -> logHelper.subStatment(), subStatementType)
                                             .execute((binding) -> logHelper.enter(binding.get(subStatement), SubStatement))
-                                            .executeAndReturn(result, (notUsed) -> res.init, res.type)
+                                            .executeAndReturn(resultVar, (notUsed) -> res.init, res.type)
                                             .execute((binding) -> logHelper.exit(binding.get(subStatement), SubStatement))
                                             .execute((binding) -> {
                                                 Logger.Identifier identifier = logHelper.localIdentifier("-", res.name.toString());
-                                                Logger.Value value = logHelper.valueRepr(mkTree.Ident(binding.get(result)));
+                                                Logger.Value value = logHelper.valueRepr(mkTree.Ident(binding.get(resultVar)));
                                                 Logger.Write write = logHelper.write(identifier, value);
                                                 return logHelper.logSimpleExpression(format, value, List.of(write));
                                             })
@@ -455,6 +587,15 @@ public class TreeInstrumenter extends TreeTranslator {
 
     }
 
+    private static void assertBlock(JCTree.JCStatement stat) {
+        assertThat(stat instanceof JCTree.JCBlock, "should be block");
+    }
+
+    private static void assertThat(boolean cond, String msg) {
+        if (!cond)
+            throw new IllegalArgumentException(msg);
+    }
+
 
     /*******************************************************
      **************** log statement  ******************
@@ -468,7 +609,17 @@ public class TreeInstrumenter extends TreeTranslator {
                     throw new IllegalArgumentException("you should use the version that return a statement");
                 super.visitApply(call);
 
-                throw new UnsupportedOperationException("unsupported");
+                // we do easy thing 1 sub-statement per argument
+                Type.MethodType methodType = (Type.MethodType) call.meth.type;
+                call.args = List.from(IntStream.range(0, call.args.size()).boxed().toList())
+                                .map(i -> makeExpressionSequence()
+                                        .subStatementAndReturn(this, "-", (ignored)-> call.args.get(i), methodType.getParameterTypes().get(i))
+                                        .build());
+
+                yield  makeExpressionSequence()
+                        .statementAndReturn(this, "-", (ignored)-> logExecutionStep(call), call.type)
+                        .build();
+
             }
             case JCTree.JCNewClass call -> {
                 super.visitNewClass(call);
@@ -476,7 +627,15 @@ public class TreeInstrumenter extends TreeTranslator {
             }
             case JCTree.JCAssignOp assign -> {
                 super.visitAssignop(assign);
-                throw new UnsupportedOperationException("unsupported");
+                JCTree.JCAssignOp res = (JCTree.JCAssignOp) this.result;
+                //TODO support all different identifiers
+                res.rhs = makeExpressionSequence()
+                        .subStatementAndReturn(this, "-", (notUsed) -> res.rhs, assign.type)
+                        .build();
+
+                yield makeExpressionSequence()
+                        .statementAndReturn(this, "-", (notUsed) -> logExecutionStep(res), res.type)
+                        .build();
             }
             case JCTree.JCIdent ident -> {
                 super.visitIdent(ident);
@@ -489,8 +648,7 @@ public class TreeInstrumenter extends TreeTranslator {
                         .executeAndBind(statementEvent, (notUsed) -> logHelper.statment(), statementType)
                         .execute((binds) -> logHelper.enter(binds.get(statementEvent), Statement))
                         .executeAndReturn("-", (binds) -> {
-                            //TODO log execution step
-                            return res;
+                            return logExecutionStep(res);
                         }, res.type)
                         .execute((binds) -> logHelper.exit(binds.get(statementEvent), Statement))
                         .build();
@@ -564,10 +722,17 @@ public class TreeInstrumenter extends TreeTranslator {
                         .build();
 
             }
-            case JCTree.JCParens parens -> {
-                super.visitParens(parens);
-                throw new UnsupportedOperationException("unsupported");
+            case JCTree.JCInstanceOf test -> {
+                test.expr = translate(test.expr);
+                test.expr =  makeExpressionSequence()
+                        .subStatementAndReturn(this, "-", (ignored)->test.expr, helper.objectP)
+                        .build();
+                yield makeExpressionSequence()
+                        .statementAndReturn(this, "-", (ignored)->logExecutionStep(test), helper.boolP)
+                        .build();
             }
+            case JCTree.JCParens parens -> mkTree.Parens(visitStatement(parens.getExpression()));
+            case JCTree.JCLiteral lit -> lit;
             default -> throw new IllegalStateException("Unexpected value: " + statement);
         };
     }
@@ -576,30 +741,112 @@ public class TreeInstrumenter extends TreeTranslator {
      **************** log execution step  ******************
      *******************************************************/
 
-    private JCTree.JCExpression logExecutionStep(JCTree.JCBinary binary) {
-        SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(binary);
+    private JCTree.JCExpression logExecutionStep(JCTree.JCIdent ident) {
+        SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(ident);
 
-        String result = "result";
+        String res = "result";
         return makeExpressionSequence()
-                .executeAndReturn(result, (notUsed) -> binary, binary.type)
+                .executeAndReturn(res, (notUsed) -> ident, ident.type)
                 .execute((binds) ->
                         logHelper.logSimpleExpression(
                                 format,
-                                logHelper.valueRepr(mkTree.Ident(binds.get(result))),
+                                logHelper.valueRepr(mkTree.Ident(binds.get(res))),
                                 List.nil()))
+                .build();
+    }
+
+    private JCTree.JCExpression logExecutionStep(JCTree.JCInstanceOf test) {
+        SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(test);
+
+        String res = "result";
+        return makeExpressionSequence()
+                .executeAndReturn(res, (notUsed) -> test, helper.boolP)
+                .execute((binds) ->
+                        logHelper.logSimpleExpression(
+                                format,
+                                logHelper.valueRepr(mkTree.Ident(binds.get(res))),
+                                List.nil()))
+                .build();
+    }
+
+    private JCTree.JCExpression logExecutionStep(JCTree.JCBinary binary) {
+        SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(binary);
+
+        String res = "result";
+        return makeExpressionSequence()
+                .executeAndReturn(res, (notUsed) -> binary, binary.type)
+                .execute((binds) ->
+                        logHelper.logSimpleExpression(
+                                format,
+                                logHelper.valueRepr(mkTree.Ident(binds.get(res))),
+                                List.nil()))
+                .build();
+    }
+
+    private JCTree.JCExpression logExecutionStep(JCTree.JCMethodInvocation call) {
+        SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(call);
+
+        String res = "result";
+        String callEvent = "call";
+        List<String> argsName = List.from(IntStream.range(0, call.args.size())
+                .mapToObj(i -> "arg" + i).toList());
+
+        ExpressionSequenceWithoutReturn builder = makeExpressionSequence();
+
+
+        Type.MethodType methodType = (Type.MethodType) call.meth.type;
+        IntStream.range(0, call.args.size())
+                .forEach(i -> {
+                    Type argType = methodType.getParameterTypes().get(i);
+                    builder.executeAndBind(argsName.get(i), (notUsed) -> call.args.get(i), argType);
+                });
+
+
+        return builder
+                .executeAndBind(callEvent, (notUsed) -> logHelper.call(format), helper.type(Logger.FileLoggerSubClasses.Call.clazz))
+                .execute((binds) -> logHelper.logCall(
+                        binds.get(callEvent),
+                        argsName.map(name -> logHelper.valueRepr(mkTree.Ident(binds.get(name))))))
+                .executeAndReturn(res, (binds) -> {
+                    call.args = argsName.map(name -> mkTree.Ident(binds.get(name)));
+                    return call;
+                }, call.type)
+                .execute((binds) -> logHelper.logReturn(binds.get(callEvent), logHelper.valueRepr(mkTree.Ident(binds.get(res)))))
+                .build();
+    }
+
+    private JCTree.JCExpression logExecutionStep(JCTree.JCAssignOp op) {
+        SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(op);
+
+        String res = "result";
+        String resVal = "val";
+
+        return makeExpressionSequence()
+                .executeAndReturn(res, (notUsed) -> op, op.type)
+                .executeAndBind(resVal, (binds) -> logHelper.valueRepr(mkTree.Ident(binds.get(res))).value(), valueType)
+                .execute((binds) -> {
+
+                    Logger.Identifier identifier = logHelper.localIdentifier("-", op.lhs.toString());
+                    Logger.Value value = new Logger.Value(mkTree.Ident(binds.get(resVal)));
+                    Logger.Write write = logHelper.write(identifier, value);
+                    return logHelper.logSimpleExpression(
+                            format,
+                            value,
+                            List.of(write));
+                })
                 .build();
     }
 
     private JCTree.JCExpression logExecutionStep(JCTree.JCAssign assign) {
         SourceFormat.NodeSourceFormat format = makeNodeId.nodeId(assign);
-        String result = "result";
+        String res = "result";
 
         return makeExpressionSequence()
-                .executeAndReturn(result, (notUsed) -> assign, assign.type)
+                .executeAndReturn(res, (notUsed) -> assign, assign.type)
                 .execute((binds) -> {
                     //TODO compute value only 1 time
                     Logger.Identifier identifier = logHelper.localIdentifier("-", assign.lhs.toString());
-                    Logger.Value value = logHelper.valueRepr(mkTree.Ident(binds.get(result)));
+                    Logger.Value value = logHelper.valueRepr(mkTree.Ident(binds.get(res)));
                     Logger.Write write = logHelper.write(identifier, value);
                     return logHelper.logSimpleExpression(
                             format,
@@ -638,7 +885,7 @@ public class TreeInstrumenter extends TreeTranslator {
      **************/
 
     public StatementSequenceWithoutBlock makeStatementSequence() {
-        return StatementSequenceBuilder.make(context.currentMethod().method.sym, helper, mkTree);
+        return StatementSequenceBuilder.make(context.currentMethod().methodSymbol, helper, mkTree);
     }
 
     public StatementSequenceWithoutBlock makeStatementSequence(Symbol.MethodSymbol symbol) {
@@ -646,7 +893,7 @@ public class TreeInstrumenter extends TreeTranslator {
     }
 
     public ExpressionSequenceWithoutReturn makeExpressionSequence() {
-        return new ExpressionSequenceBuilder(context.currentMethod().method.sym, helper, mkTree);
+        return new ExpressionSequenceBuilder(context.currentMethod().methodSymbol, helper, mkTree);
     }
 
     /**************
@@ -675,6 +922,10 @@ public class TreeInstrumenter extends TreeTranslator {
         ExpressionSequenceWithoutReturn executeAndBind(String name, Function<Map<String, Symbol>, JCTree.JCExpression> expr, Type exprType);
 
         ExpressionSequenceWithReturn executeAndReturn(String name, Function<Map<String, Symbol>, JCTree.JCExpression> expr, Type exprType);
+
+        ExpressionSequenceWithReturn statementAndReturn(TreeInstrumenter instr, String name, Function<Map<String, Symbol>, JCTree.JCExpression> expr, Type exprType);
+
+        ExpressionSequenceWithReturn subStatementAndReturn(TreeInstrumenter instr, String name, Function<Map<String, Symbol>, JCTree.JCExpression> expr, Type exprType);
 
     }
 
@@ -727,6 +978,26 @@ public class TreeInstrumenter extends TreeTranslator {
         }
 
         @Override
+        public ExpressionSequenceWithReturn statementAndReturn(TreeInstrumenter instr, String name, Function<Map<String, Symbol>, JCTree.JCExpression> expr, Type exprType) {
+            String statement = "statement";
+            return this
+                    .executeAndBind(statement, (notUsed) -> instr.logHelper.statment(), instr.statementType)
+                    .execute((binds) -> instr.logHelper.enter(binds.get(statement), instr.Statement))
+                    .executeAndReturn(name, expr, exprType)
+                    .execute((binds) -> instr.logHelper.exit(binds.get(statement), instr.Statement));
+        }
+
+        @Override
+        public ExpressionSequenceWithReturn subStatementAndReturn(TreeInstrumenter instr, String name, Function<Map<String, Symbol>, JCTree.JCExpression> expr, Type exprType) {
+            String statement = "subStatement";
+            return this
+                    .executeAndBind(statement, (notUsed) -> instr.logHelper.subStatment(), instr.subStatementType)
+                    .execute((binds) -> instr.logHelper.enter(binds.get(statement), instr.SubStatement))
+                    .executeAndReturn(name, expr, exprType)
+                    .execute((binds) -> instr.logHelper.exit(binds.get(statement), instr.SubStatement));
+        }
+
+        @Override
         public JCTree.JCExpression build() {
             return mkTree.LetExpr(
                     exprSequence.map(vDef -> mkTree.VarDef(vDef.symbol, vDef.expr)),
@@ -758,11 +1029,12 @@ public class TreeInstrumenter extends TreeTranslator {
 
         //only used for method definition as we have to exit in return, but return will be created before
         //we create the flow object
-        Symbol.VarSymbol newSymbol(Type type);
+
 
         StatementSequenceWithoutBlock execute(Function<Map<String, Symbol>, JCTree.JCExpression> stat);
 
         StatementSequenceWithBlock block(JCTree.JCBlock block);
+        StatementSequenceWithBlock flow(TreeInstrumenter instr, JCTree.JCBlock block);
 
         StatementSequenceWithoutBlock executeAndBind(String name, Function<Map<String, Symbol>, JCTree.JCExpression> stat, Type exprType);
 
@@ -806,11 +1078,6 @@ public class TreeInstrumenter extends TreeTranslator {
             private List<JCTree.JCStatement> before = List.nil();
 
             @Override
-            public Symbol.VarSymbol newSymbol(Type type) {
-                return nextSymbol(type);
-            }
-
-            @Override
             public WithoutBlock execute(Function<Map<String, Symbol>, JCTree.JCExpression> stat) {
                 before = before.append(mkTree.Exec(stat.apply(nameToValue)));
                 return this;
@@ -819,6 +1086,15 @@ public class TreeInstrumenter extends TreeTranslator {
             @Override
             public StatementSequenceWithBlock block(JCTree.JCBlock block) {
                 return StatementSequenceBuilder.this.new WithBlock(block, before);
+            }
+
+            @Override
+            public StatementSequenceWithBlock flow(TreeInstrumenter instr, JCTree.JCBlock block) {
+                String flow = "flow";
+                return this.executeAndBind(flow, (ignored)-> instr.logHelper.controlFlow(), instr.flowType)
+                        .execute((binds)->instr.logHelper.enter(binds.get(flow), instr.Flow))
+                        .block(block)
+                        .execute((binds)->instr.logHelper.exit(binds.get(flow), instr.Flow));
             }
 
 

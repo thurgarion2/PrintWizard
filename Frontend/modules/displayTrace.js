@@ -34,7 +34,10 @@ function printTree(event){
         event.executions().forEach(element => {
             switch(element.type){
                 case 'ExecutionStep':
-                    level(depth+1, 'step : '+element.kind.type.toString())
+                    let nodedescrp = ''
+                    if(element.nodeId.expression!==undefined)
+                        nodedescrp = element.nodeId.expression.tokens[0].text
+                    level(depth+1, 'step : '+element.kind.type.toString() +' ' +nodedescrp)
                     break;
                 case 'Event':
                     helper(element, depth+1)
@@ -58,6 +61,7 @@ Promise.all([initCache()])
 
        
         const rootEvent = parseEventTrace(rawTrace)
+        debugger;
        
         
 

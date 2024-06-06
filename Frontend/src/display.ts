@@ -78,15 +78,19 @@ function traceItem(event: EventWithContext<ItemContext, ItemState>): TraceItem {
         defaultHidden: HTMLElement[]
     }
 
+    
     function helper(event: EventWithContext<ItemContext, ItemState>): HelperResult {
         let trace: HTMLElement[] = []
         let defaultHidden: HTMLElement[] = []
         let executionSteps: HTMLElement[] = []
-        const codeToHtml = event.kind.type === EventKindTypes.Statement ? statmentCodeToHtml : subStatmentCodeToHtml;
+        const codeToHtml = event.kind.type === EventKindTypes.SubStatement ? subStatmentCodeToHtml : statmentCodeToHtml ;
 
         event.executions().forEach(child => {
             switch (child.type) {
                 case 'ExecutionStep':
+            
+                   
+                        
 
                     const step = itemToHtml(event.context, event.state.writes, child, codeToHtml)
                     executionSteps.push(step)
@@ -110,9 +114,11 @@ function traceItem(event: EventWithContext<ItemContext, ItemState>): TraceItem {
                 }
             case EventKindTypes.Statement:
                 console.assert(executionSteps.length === 1)
-                offToggleBox(executionSteps[0],
-                    () => { defaultHidden.forEach(hide) },
-                    () => { defaultHidden.forEach(show) })
+                if (executionSteps.length === 1) {
+                    offToggleBox(executionSteps[0],
+                        () => { defaultHidden.forEach(hide) },
+                        () => { defaultHidden.forEach(show) })
+                }
                 return {
                     item: defaultBox(trace),
                     defaultHidden: []
@@ -156,11 +162,11 @@ function aggregateItemState(event: Event, states: ItemState[]): ItemState {
     switch (event.kind.type) {
         case EventKindTypes.Statement:
         case EventKindTypes.SubStatement:
-            
+
             const steps: SimpleExpression[] = event.executions()
                 .filter(x => x.type === 'ExecutionStep' && x.kind.type === ExecutionStepTypes.SimpleExpression)
                 .map(x => x.kind) as SimpleExpression[];
-            
+
             const writes = steps
                 .map(s => s.assigns)
                 .reduce((acc: Write[], val: Write[]) => acc.concat(val), [])

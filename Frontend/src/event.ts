@@ -201,6 +201,8 @@ function parseEvent(labels: RawStep[], startIndex: number): [Event, number] {
     let index = startIndex + 1
     let current = labels[index]
 
+    let callStore : Map<number, ExecutionStep> = new Map();
+
     while (current.type !== StepType.GroupEvent || current.fields.get('pos') !== 'end') {
         if (current.type === StepType.ExecutionStep) {
             switch (current.fields.get('kind')) {
@@ -217,6 +219,35 @@ function parseEvent(labels: RawStep[], startIndex: number): [Event, number] {
                         )
                     )
                     break;
+                case 'logVoidCall':
+                    
+                    children.push(makeExecutionStep(
+                        findNodeSynthax(current.fields.get('nodeKey')),
+                        {
+                            type: ExecutionStepTypes.VoidCall,
+                            argVaules: current.fields.get('argsValues').map(valueFromJson)
+                        }
+                    ))
+
+                    break;
+                case 'logCall':
+                    let step1 = makeExecutionStep(
+                        findNodeSynthax(current.fields.get('nodeKey')),
+                        {
+                            type: ExecutionStepTypes.Call,
+                            result: undefined as any,
+                            argVaules: current.fields.get('argsValues').map(valueFromJson)
+                        }
+                    )
+                    children.push(step1)
+                    callStore.set(current.fields.get('stepId'), step1)
+                    break;
+                case 'logReturn':
+                    console.assert(callStore.has(current.fields.get('stepId')))
+                    let step2 : ExecutionStep = callStore.get(current.fields.get('stepId')) as ExecutionStep;
+                    console.assert(step2.kind.type === ExecutionStepTypes.Call);
+                    (step2.kind as Call).result = valueFromJson(current.fields.get('result'))
+                    break; 
                 default:
                     debugger;
                     throw new Error("unspported");
@@ -236,8 +267,8 @@ function parseEvent(labels: RawStep[], startIndex: number): [Event, number] {
         }
     }
 
-   
-    
+
+
     console.assert(current.fields.get('pos') === 'end')
     console.assert(current.fields.get('eventId') === eventId)
 
@@ -382,7 +413,6 @@ type SourceFile = {
 ********/
 
 type PresentInSourceCode = {
-    tokens: Token[],
     children: string[],
     sourceFile: SourceFile,
     identifier: string,

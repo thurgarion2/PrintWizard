@@ -251,12 +251,13 @@ public class FileLogger {
         return 0;
     }
 
-    public static Call call() {
-        return new Call(0);
+    public static Call call(String nodeKey) {
+
+        return new Call(nodeKey,nextId());
     }
 
-    public static VoidCall voidCall() {
-        return new VoidCall(0);
+    public static VoidCall voidCall(String nodeKey) {
+        return new VoidCall(nodeKey,0);
     }
 
     /********
@@ -281,33 +282,60 @@ public class FileLogger {
 
     public static final class Call implements ExecutionStep {
         private final long id;
+        private final String nodeKey;
 
-        private Call(long id) {
+        private Call(String nodeKey, long id) {
             this.id = id;
+            this.nodeKey = nodeKey;
         }
 
         public int logCall(Value[] argValues) {
+            traceWriter.value(new JSONObject(Map.of(
+                    "type", ExecutionStep,
+                    "kind", "logCall",
+                    "nodeKey", nodeKey,
+                    "stepId", id,
+                    "argsValues", new JSONArray(
+                            Arrays.stream(argValues).map(JsonSerializable::json).toList())
+            )));
             return 0;
         }
 
         public int logReturn(Value result) {
+            traceWriter.value(new JSONObject(Map.of(
+                    "type", ExecutionStep,
+                    "kind", "logReturn",
+                    "nodeKey", nodeKey,
+                    "stepId", id,
+                    "result", result.json()
+            )));
             return 0;
         }
     }
 
     public static final class VoidCall implements ExecutionStep {
         private final long id;
+        private final String nodeKey;
 
-        private VoidCall(long id) {
+        private VoidCall(String nodeKey, long id) {
             this.id = id;
+            this.nodeKey = nodeKey;
         }
 
         public int logCall(Value[] argValues) {
+            traceWriter.value(new JSONObject(Map.of(
+                    "type", ExecutionStep,
+                    "kind", "logVoidCall",
+                    "nodeKey", nodeKey,
+                    "stepId", id,
+                    "argsValues", new JSONArray(
+                            Arrays.stream(argValues).map(JsonSerializable::json).toList())
+            )));
             return 0;
         }
 
         public int logReturn() {
-            return 0;
+            throw new UnsupportedOperationException();
         }
     }
 

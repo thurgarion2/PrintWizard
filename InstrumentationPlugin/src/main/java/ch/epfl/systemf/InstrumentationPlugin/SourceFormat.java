@@ -298,6 +298,10 @@ public class SourceFormat {
      **** create node id
      ********/
     public NodeSourceFormat nodeId(JCTree node) {
+        //TODO handle literal when inside function calls
+        if(!preComputed.containsKey(node))
+            System.out.println(node.getClass().getName());
+
         return preComputed.getOrDefault(node, new AbsentFromSourceCode());
     }
 
@@ -510,6 +514,42 @@ public class SourceFormat {
         @Override
         public void visitVarDef(JCTree.JCVariableDecl tree) {
             super.visitVarDef(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
+        }
+
+        @Override
+        public void visitApply(JCTree.JCMethodInvocation tree) {
+            super.visitApply(tree);
+            preComputed.put(tree, computeNodeId(tree, tree.args));
+        }
+
+        @Override
+        public void visitNewClass(JCTree.JCNewClass tree) {
+            super.visitNewClass(tree);
+            preComputed.put(tree, computeNodeId(tree, tree.args));
+        }
+
+        @Override
+        public void visitAssert(JCTree.JCAssert tree) {
+            super.visitAssert(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
+        }
+
+        @Override
+        public void visitIdent(JCTree.JCIdent tree) {
+            super.visitIdent(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
+        }
+
+        @Override
+        public void visitReturn(JCTree.JCReturn tree) {
+            super.visitReturn(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
+        }
+
+        @Override
+        public void visitAssignop(JCTree.JCAssignOp tree) {
+            super.visitAssignop(tree);
             preComputed.put(tree, computeNodeId(tree, List.of()));
         }
     }

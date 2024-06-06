@@ -118,22 +118,22 @@ public class Logger {
                         helper.array(FileLoggerSubClasses.Write.clazz, assigns.map(a -> a.write))));
     }
 
-    public JCTree.JCExpression call() {
+    public JCTree.JCExpression call(SourceFormat.NodeSourceFormat nodeFormat) {
         return helper.callStaticMethod(
                 FILE_Logger,
                 "call",
-                List.nil(),
+                List.of(helper.string),
                 helper.type(FileLoggerSubClasses.Call.clazz),
-                List.nil());
+                List.of(mkTree.Literal(nodeFormat.identifier())));
     }
 
-    public JCTree.JCExpression voidCall() {
+    public JCTree.JCExpression voidCall(SourceFormat.NodeSourceFormat format) {
         return helper.callStaticMethod(
                 FILE_Logger,
-                "call",
-                List.nil(),
+                "voidCall",
+                List.of(helper.string),
                 helper.type(FileLoggerSubClasses.VoidCall.clazz),
-                List.nil());
+                List.of(mkTree.Literal(format.identifier())));
     }
 
     /**************

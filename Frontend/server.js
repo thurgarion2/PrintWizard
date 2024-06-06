@@ -67,7 +67,7 @@ const exposeModule = function (req, res, path) {
         });
 };
 
-
+const ProjectFile = './../IntegrationTest/JumboTrace/examples/TypeTests'
 const requestListener = function (req, res) {
     switch (req.url) {
         case "/":
@@ -77,13 +77,13 @@ const requestListener = function (req, res) {
             css(req, res)
             break
         case "/eventTrace":
-            exposeFile(req, res, './../eventTrace.json')
+            exposeFile(req, res, ProjectFile+'/eventTrace.json')
             break
         case "/sourceFormat":
-            exposeFile(req, res, './../source_format.json')
+            exposeFile(req, res, ProjectFile+'/source_format.json')
             break
         case "/objectData":
-            exposeFile(req, res, './../objectData.json')
+            exposeFile(req, res, ProjectFile+'/objectData.json')
             break
         case "/displayTrace":
             exposeModule(req, res, './modules/displayTrace.js');
