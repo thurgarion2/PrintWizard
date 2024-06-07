@@ -32,7 +32,8 @@ public class Logger {
 
     public enum FileLoggerSubClasses {
         TryCatch("TryCatch"),
-        ControlFlow("ControlFlow"),
+        DefaultControlFlow("DefaultControlFlow"),
+        FunControlFlow("FunctionContext"),
         Statment("Statment"),
         SubStatment("SubStatment"),
         Call("Call"),
@@ -75,8 +76,17 @@ public class Logger {
                 FILE_Logger,
                 "controlFlow",
                 List.nil(),
-                helper.type(FileLoggerSubClasses.ControlFlow.clazz),
+                helper.type(FileLoggerSubClasses.DefaultControlFlow.clazz),
                 List.nil());
+    }
+
+    public JCTree.JCExpression functionFlow(String fullName) {
+        return helper.callStaticMethod(
+                FILE_Logger,
+                "functionFlow",
+                List.of(helper.string),
+                helper.type(FileLoggerSubClasses.FunControlFlow.clazz),
+                List.of(mkTree.Literal(fullName)));
     }
 
     public JCTree.JCExpression statment() {
@@ -115,6 +125,20 @@ public class Logger {
                 List.of(
                         mkTree.Literal(nodeFormat.identifier()),
                         result.value,
+                        helper.array(FileLoggerSubClasses.Write.clazz, assigns.map(a -> a.write))));
+    }
+
+    public JCTree.JCExpression logSimpleExpression(SourceFormat.NodeSourceFormat nodeFormat, List<Write> assigns) {
+        return helper.callStaticMethod(
+                FILE_Logger,
+                "logSimpleExpression",
+                List.of(
+                        helper.string,
+                        helper.arrayType(FileLoggerSubClasses.Write.clazz)
+                ),
+                helper.intP,
+                List.of(
+                        mkTree.Literal(nodeFormat.identifier()),
                         helper.array(FileLoggerSubClasses.Write.clazz, assigns.map(a -> a.write))));
     }
 

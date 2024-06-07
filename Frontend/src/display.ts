@@ -27,7 +27,7 @@ export {
     initialContext,
     propagateItemContext,
     aggregateItemState,
-    traceItem
+    itemForFlow
 };
 
 /**************
@@ -71,70 +71,111 @@ interface DisplayObject {
  ********* transforms
  **************/
 
-function traceItem(event: EventWithContext<ItemContext, ItemState>): TraceItem {
+function itemForFlow(event: EventWithContext<ItemContext, ItemState>): TraceItem {
+    console.assert(event.kind.type === EventKindTypes.Flow)
 
-    type HelperResult = {
-        item: HTMLElement
-        defaultHidden: HTMLElement[]
-    }
-
-    
-    function helper(event: EventWithContext<ItemContext, ItemState>): HelperResult {
-        let trace: HTMLElement[] = []
-        let defaultHidden: HTMLElement[] = []
-        let executionSteps: HTMLElement[] = []
-        const codeToHtml = event.kind.type === EventKindTypes.SubStatement ? subStatmentCodeToHtml : statmentCodeToHtml ;
-
-        event.executions().forEach(child => {
-            switch (child.type) {
-                case 'ExecutionStep':
-            
-                   
-                        
-
-                    const step = itemToHtml(event.context, event.state.writes, child, codeToHtml)
-                    executionSteps.push(step)
-                    trace.push(step)
-                    break;
-                case 'Event':
-                    const res = helper(child)
-                    trace.push(res.item)
-
-                    defaultHidden.push(...res.defaultHidden)
-
-            }
-        })
-
-        switch (event.kind.type) {
-            case EventKindTypes.Flow:
-                console.assert(defaultHidden.length === 0, 'should not have any hidden step')
-                return {
-                    item: defaultBox(trace),
-                    defaultHidden: []
+    let items: HTMLElement[] = event.executions().map(child => {
+        switch (child.type) {
+            case 'Event':
+                switch (child.kind.type) {
+                    case EventKindTypes.Flow:
+                        return itemForFlow(child).html();
+                    case EventKindTypes.Statement:
+                        return itemForStatement(child).html();
+                    default:
+                        console.assert(false);
+                        return empty()
                 }
-            case EventKindTypes.Statement:
-                console.assert(executionSteps.length === 1)
-                if (executionSteps.length === 1) {
-                    offToggleBox(executionSteps[0],
-                        () => { defaultHidden.forEach(hide) },
-                        () => { defaultHidden.forEach(show) })
-                }
-                return {
-                    item: defaultBox(trace),
-                    defaultHidden: []
-                }
-            case EventKindTypes.SubStatement:
-                defaultHidden.push(...executionSteps)
-                return {
-                    item: defaultBox(trace),
-                    defaultHidden: defaultHidden
-                }
+            case 'ExecutionStep':
+                console.assert(false);
+                return empty()
         }
+    })
+    return {
+        html: () => defaultBox(items)
     }
-    let html = helper(event).item
+}
+
+function itemForStatement(event: EventWithContext<ItemContext, ItemState>): TraceItem {
+    console.assert(event.kind.type === EventKindTypes.Statement)
+
+    let sub: HTMLElement[] = []
+    let flow: HTMLElement[] = []
+    let stat: HTMLElement[] = []
+
+    let item = undefined
+    let items: HTMLElement[] = event.executions().map(child => {
+        switch (child.type) {
+            case 'Event':
+                switch (child.kind.type) {
+                    case EventKindTypes.Flow:
+                        let flowItem = itemForFlow(child).html();
+
+                        switch (child.kind.kind.type) {
+                            case 'DefaultContext':
+                                return flowItem;
+                            case 'FunctionContext':
+                                let expandItem = textBox(PrintWizardStyle.None, "...")
+                                const name = textBox(PrintWizardStyle.None, child.kind.kind.functionName)
+                                item = defaultBox([name, flowItem, expandItem])
+                                offToggleBox(name,
+                                    () => {
+                                        show(expandItem)
+                                        hide(flowItem)
+                                    },
+                                    () => {
+                                        hide(expandItem)
+                                        show(flowItem)
+                                    })
+                                return item;
+                        }
+
+                    case EventKindTypes.SubStatement:
+                        item = itemForSubStatement(child).html();
+                        sub.push(item)
+                        return item;
+                    default:
+                        console.assert(false);
+                        return empty()
+                }
+            case 'ExecutionStep':
+                item = itemToHtml(event.context, event.state.writes, child, statmentCodeToHtml)
+                stat.push(item)
+                return item;
+        }
+    })
+
+    if (stat.length > 0)
+        offToggleBox(stat[0],
+            () => { sub.forEach(hide) },
+            () => { sub.forEach(show) })
+
 
     return {
-        html: () => html
+        html: () => defaultBox(items)
+    }
+
+}
+
+function itemForSubStatement(event: EventWithContext<ItemContext, ItemState>): TraceItem {
+    console.assert(event.kind.type === EventKindTypes.SubStatement)
+
+    let items: HTMLElement[] = event.executions().map(child => {
+        switch (child.type) {
+            case 'Event':
+                switch (child.kind.type) {
+                    case EventKindTypes.Flow:
+                        return itemForFlow(child).html();
+                    default:
+                        console.assert(false);
+                        return empty()
+                }
+            case 'ExecutionStep':
+                return itemToHtml(event.context, event.state.writes, child, subStatmentCodeToHtml)
+        }
+    })
+    return {
+        html: () => defaultBox(items)
     }
 }
 
@@ -144,7 +185,7 @@ function traceItem(event: EventWithContext<ItemContext, ItemState>): TraceItem {
  **************/
 
 const initialContext: ItemContext = {
-    ident: 0
+    ident: -1
 }
 
 
@@ -280,9 +321,9 @@ function subStatmentCodeToHtml(
 
 
     let code: Node[] = [
-        textEl(SPACE.repeat(synthax.prefix.text.length)),
+        textEl(SPACE.repeat(3)),
         box(
-            PrintWizardStyle.Expression,
+            PrintWizardStyle.None,
             synthax.expression.tokens.flatMap(token => tokenToHtml(token, argumentValue(nodeData.childrenValues, inspector))
             )),
         ...resultHtml,
@@ -557,6 +598,7 @@ function emojiUnicode(n: number): string {
  **************/
 
 enum PrintWizardStyle {
+    None = 'none',
     LineNumbers = 'line_numbers',
     LineNumber = 'line_number',
     TraceItem = 'trace_item',

@@ -4,7 +4,7 @@ import {
     propagateItemContext,
     aggregateItemState,
     initialContext,
-    traceItem
+    itemForFlow
 } from './display'
 import { parseEventTrace } from './event'
 
@@ -60,10 +60,7 @@ Promise.all([initCache()])
         let rawTrace = traceCache().data().payload
 
        
-        const rootEvent = parseEventTrace(rawTrace)
-        debugger;
-       
-        
+        const rootEvent = parseEventTrace(rawTrace)    
 
 
         const eventWithContext = scopedContextTransform(
@@ -72,7 +69,7 @@ Promise.all([initCache()])
             aggregateItemState,
             propagateItemContext);
         
-        injectNode.appendChild(traceItem(eventWithContext).html())
+        injectNode.appendChild(itemForFlow(eventWithContext).html())
     
     })
     .catch(error => {

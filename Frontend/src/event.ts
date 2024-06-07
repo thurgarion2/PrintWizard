@@ -84,7 +84,17 @@ type SubStatement = {
 }
 
 type ControlFlow = {
-    type: EventKindTypes.Flow
+    type: EventKindTypes.Flow,
+    kind: FunctionContext | DefaultContext
+}
+
+type FunctionContext = {
+    type: 'FunctionContext',
+    functionName: string
+}
+
+type DefaultContext = {
+    type: 'DefaultContext'
 }
 
 
@@ -201,7 +211,7 @@ function parseEvent(labels: RawStep[], startIndex: number): [Event, number] {
     let index = startIndex + 1
     let current = labels[index]
 
-    let callStore : Map<number, ExecutionStep> = new Map();
+    let callStore: Map<number, ExecutionStep> = new Map();
 
     while (current.type !== StepType.GroupEvent || current.fields.get('pos') !== 'end') {
         if (current.type === StepType.ExecutionStep) {
@@ -219,8 +229,21 @@ function parseEvent(labels: RawStep[], startIndex: number): [Event, number] {
                         )
                     )
                     break;
+                case 'expressionWithoutReturn':
+
+                    children.push(
+                        makeExecutionStep(
+                            findNodeSynthax(current.fields.get('nodeKey')),
+                            {
+                                type: ExecutionStepTypes.SimpleExpression,
+                                result: undefined as any,
+                                assigns: current.fields.get('assigns').map(dataFromJson) as Write[]
+                            }
+                        )
+                    )
+                    break;
                 case 'logVoidCall':
-                    
+
                     children.push(makeExecutionStep(
                         findNodeSynthax(current.fields.get('nodeKey')),
                         {
@@ -244,10 +267,10 @@ function parseEvent(labels: RawStep[], startIndex: number): [Event, number] {
                     break;
                 case 'logReturn':
                     console.assert(callStore.has(current.fields.get('stepId')))
-                    let step2 : ExecutionStep = callStore.get(current.fields.get('stepId')) as ExecutionStep;
+                    let step2: ExecutionStep = callStore.get(current.fields.get('stepId')) as ExecutionStep;
                     console.assert(step2.kind.type === ExecutionStepTypes.Call);
                     (step2.kind as Call).result = valueFromJson(current.fields.get('result'))
-                    break; 
+                    break;
                 default:
                     debugger;
                     throw new Error("unspported");
@@ -274,7 +297,18 @@ function parseEvent(labels: RawStep[], startIndex: number): [Event, number] {
 
     switch (current.fields.get('eventType')) {
         case "controlFlow":
-            return [makeEvent(children, { type: EventKindTypes.Flow }), index];
+            const flowKind = current.fields.get('kind')
+
+            switch (flowKind['type']) {
+                case 'DefaultContext':
+                    break;
+                case 'FunctionContext':
+                    console.assert('functionName' in flowKind)
+                    break;
+                default:
+                    throw new Error("unspported");
+            }
+            return [makeEvent(children, { type: EventKindTypes.Flow, kind: flowKind }), index];
         case "statement":
             return [makeEvent(children, { type: EventKindTypes.Statement }), index];
         case "subStatement":

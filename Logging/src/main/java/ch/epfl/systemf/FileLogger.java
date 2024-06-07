@@ -28,8 +28,12 @@ public class FileLogger {
      **** api
      ********/
 
-    public static ControlFlow controlFlow() {
-        return new ControlFlow();
+    public static DefaultControlFlow controlFlow() {
+        return new DefaultControlFlow();
+    }
+
+    public static FunctionContext functionFlow(String fullName) {
+        return new FunctionContext(fullName);
     }
 
     public static TryCatch tryCatch() {
@@ -80,12 +84,30 @@ public class FileLogger {
         }
 
         static JSONObject eventRep(GroupEvent event, String pos) {
-            return new JSONObject(Map.of(
+            JSONObject base = new JSONObject(Map.of(
                     "type", "GroupEvent",
                     "pos", pos,
                     "eventId", event.eventId(),
                     "eventType", event.type().repr
             ));
+
+            switch(event){
+                case ControlFlow flow:
+                    return switch (flow.kind()) {
+                        case ControlFlowKind.Default def -> {
+                            base.put("kind", new JSONObject(Map.of("type", "DefaultContext")));
+                            yield base;
+                        }
+                        case ControlFlowKind.FunctionContext fun -> {
+                            base.put("kind", new JSONObject(Map.of(
+                                    "type", "FunctionContext",
+                                    "functionName", fun.fullName)));
+                            yield base;
+                        }
+                    };
+                default:
+                    return base;
+            }
         }
 
         static void exitUpTo(GroupEvent event){
@@ -107,6 +129,16 @@ public class FileLogger {
             if (!top.equals(event))
                 throw new IllegalStateException();
         }
+
+        public default int enter() {
+            GroupEvent.enter(this);
+            return 0;
+        }
+
+        public default int exit() {
+            GroupEvent.exit(this);
+            return 0;
+        }
     }
 
     /********
@@ -114,22 +146,23 @@ public class FileLogger {
      ********/
 
 
-    public static final class ControlFlow implements GroupEvent {
-        private final long eventId;
 
-        private ControlFlow() {
-            eventId = nextId();
-        }
+    public sealed interface ControlFlow extends GroupEvent {
+        ControlFlowKind kind();
 
-        public int enter() {
-            GroupEvent.enter(this);
-            return 0;
+        @Override
+        default GroupEventType type() {
+            return GroupEventType.ControlFlow;
         }
+    }
 
-        public int exit() {
-            GroupEvent.exit(this);
-            return 0;
-        }
+    public sealed interface ControlFlowKind{
+        record Default() implements ControlFlowKind{}
+        record FunctionContext(String fullName) implements ControlFlowKind{}
+    }
+
+    public final static class DefaultControlFlow implements ControlFlow {
+        private final long eventId = nextId();
 
         @Override
         public long eventId() {
@@ -137,8 +170,28 @@ public class FileLogger {
         }
 
         @Override
-        public GroupEventType type() {
-            return GroupEventType.ControlFlow;
+        public ControlFlowKind kind() {
+            return new ControlFlowKind.Default();
+        }
+    }
+
+    public final static class FunctionContext implements ControlFlow {
+        private final long eventId = nextId();
+        private final String fullFunctionName;
+
+        public FunctionContext(String fullFunctionName){
+            this.fullFunctionName = fullFunctionName;
+        }
+
+
+        @Override
+        public long eventId() {
+            return eventId;
+        }
+
+        @Override
+        public ControlFlowKind kind() {
+            return new ControlFlowKind.FunctionContext(fullFunctionName);
         }
     }
 
@@ -148,8 +201,8 @@ public class FileLogger {
 
 
     public static final class TryCatch {
-        private final ControlFlow tryFlow = new ControlFlow();
-        private final ControlFlow catchFlow = new ControlFlow();
+        private final ControlFlow tryFlow = new DefaultControlFlow();
+        private final ControlFlow catchFlow = new DefaultControlFlow();
 
 
         public int enterTry() {
@@ -185,15 +238,6 @@ public class FileLogger {
             eventId = nextId();
         }
 
-        public int enter() {
-            GroupEvent.enter(this);
-            return 0;
-        }
-
-        public int exit() {
-            GroupEvent.exit(this);
-            return 0;
-        }
 
         @Override
         public long eventId() {
@@ -217,16 +261,6 @@ public class FileLogger {
             eventId = nextId();
         }
 
-        public int enter() {
-            GroupEvent.enter(this);
-            return 0;
-        }
-
-        public int exit() {
-            GroupEvent.exit(this);
-            return 0;
-        }
-
         @Override
         public long eventId() {
             return eventId;
@@ -248,6 +282,16 @@ public class FileLogger {
 
     public static int logSimpleExpression(String nodeKey, Value result, Write[] assigns) {
         traceWriter.value(new Expression(nodeKey, result, List.of(assigns)).json());
+        return 0;
+    }
+
+    public static int logSimpleExpression(String nodeKey, Write[] assigns) {
+        traceWriter.value(new JSONObject(Map.of(
+                "type", ExecutionStep.ExecutionStep,
+                "kind", "expressionWithoutReturn",
+                "nodeKey", nodeKey,
+                "assigns", new JSONArray(Arrays.stream(assigns).map(Write::json).toList())
+        )));
         return 0;
     }
 

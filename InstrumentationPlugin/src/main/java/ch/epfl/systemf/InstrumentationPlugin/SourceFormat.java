@@ -40,7 +40,7 @@ public class SourceFormat {
      **** fields
      ********/
     private record SourceFormatDescription(SourceFile sourceFile,
-                                          Set<NodeSourceFormat> syntaxNodes) implements JsonSerializable {
+                                           Set<NodeSourceFormat> syntaxNodes) implements JsonSerializable {
 
         /********
          **** SourceFormatDescription methods
@@ -115,14 +115,14 @@ public class SourceFormat {
 
     //startIndex and endIndex are defined as line:col and should uniquely identify a node
     private record PresentInSourceCode(List<NodeSourceFormat> children,
-                                      SourceFormatDescription.SourceFile sourceFile,
-                                      int startLine,
-                                      int endLine,
-                                      Expression expression,
-                                      Text prefix,
-                                      Text suffix,
-                                      String startIndex,
-                                      String endIndex) implements NodeSourceFormat, JsonSerializable {
+                                       SourceFormatDescription.SourceFile sourceFile,
+                                       int startLine,
+                                       int endLine,
+                                       Expression expression,
+                                       Text prefix,
+                                       Text suffix,
+                                       String startIndex,
+                                       String endIndex) implements NodeSourceFormat, JsonSerializable {
         /********
          **** NodeSourceFormat constructor
          ********/
@@ -171,7 +171,7 @@ public class SourceFormat {
                     "children", new JSONArray(children.stream().map(NodeSourceFormat::identifier).toList()),
                     "sourceFile", sourceFile.toJson(),
                     "identifier", identifier(),
-                    "startLine",  startLine,
+                    "startLine", startLine,
                     "endLine", endLine,
                     "expression", expression.toJson(),
                     "suffix", suffix.toJson(),
@@ -254,7 +254,6 @@ public class SourceFormat {
         );
 
 
-
         this.source = new SourceCode(applyWithAssert(compilationUnit.getSourceFile(), (path) -> {
             try {
                 return path.getCharContent(false);
@@ -299,7 +298,7 @@ public class SourceFormat {
      ********/
     public NodeSourceFormat nodeId(JCTree node) {
         //TODO handle literal when inside function calls
-        if(!preComputed.containsKey(node))
+        if (!preComputed.containsKey(node))
             System.out.println(node.getClass().getName());
 
         return preComputed.getOrDefault(node, new AbsentFromSourceCode());
@@ -309,21 +308,39 @@ public class SourceFormat {
     private NodeSourceFormat computeNodeId(JCTree node, List<? extends JCTree> children) {
 
 
-
         return switch (treeNodeToPos.pos(node)) {
             case TreeNodeToPos.NotInFile ignored -> new AbsentFromSourceCode();
+            case TreeNodeToPos.StartPos pos -> {
+                String repr = node.toString();
+                SourceCode.Range startLineRange = source.line(pos.startLine);
+
+                NodeSourceFormat nodeFormat = new PresentInSourceCode(
+                        children.stream().map(this::nodeId).toList(),
+                        sourceFile,
+                        pos.startLine,
+                        pos.startLine,
+                        new PresentInSourceCode.Expression(List.of(new PresentInSourceCode.Text(repr))),
+                        new PresentInSourceCode.Text(source.fromTo(new SourceCode.Range(startLineRange.start, pos.startSourceIndex))),
+                        new PresentInSourceCode.Text(""),
+                        pos.startLine + ":" + pos.startCol,
+                        pos.startLine + ":" + pos.startCol  + repr.length()
+                );
+                preComputed.put(node, nodeFormat);
+                yield nodeFormat;
+            }
             case TreeNodeToPos.TreePos pos -> {
 
                 List<PresentInSourceCode.Token> expression = new ArrayList<>();
                 Stream<LineOrChild> childRanges = IntStream.range(0, children.size())
                         .mapToObj(i -> switch (treeNodeToPos.pos(children.get(i))) {
                             case TreeNodeToPos.NotInFile ignored -> throw new IllegalArgumentException();
+                            case TreeNodeToPos.StartPos p -> new NodeChild(new SourceCode.Range(p.startSourceIndex, p.startSourceIndex+children.get(i).toString().length()), i);
                             case TreeNodeToPos.TreePos p -> {
                                 Assert.assertThat(pos.startLine <= p.startLine && pos.endLine >= p.endLine);
                                 yield new NodeChild(new SourceCode.Range(p.startSourceIndex, p.endSourceIndex), i);
                             }
                         });
-                Stream<LineOrChild> lines = IntStream.range(pos.startLine + 1, pos.endLine+1)
+                Stream<LineOrChild> lines = IntStream.range(pos.startLine + 1, pos.endLine + 1)
                         .mapToObj(lineNumber -> new NodeLine(source.line(lineNumber).start, lineNumber));
 
 
@@ -420,24 +437,27 @@ public class SourceFormat {
             int endIndex = endPosTable.getEndPos(tree);
 
             // we don't have end position information for some nodes
-            if(endIndex == Position.NOPOS && startIndex!=Position.NOPOS && startIndex!=0){
-                SourceCode.Range lineRange = source.line((int)lineMap.getLineNumber(startIndex));
-                endIndex = lineRange.end-1;
-            }
-
-            if (startIndex != Position.NOPOS && endIndex != Position.NOPOS && startIndex != endIndex && startIndex!=0) {
-
-                return new TreePos(
-                        (int) lineMap.getLineNumber(startIndex),
-                        (int) lineMap.getColumnNumber(startIndex),
-                        startIndex,
-                        (int) lineMap.getLineNumber(endIndex),
-                        (int) lineMap.getColumnNumber(endIndex),
-                        endIndex
-                );
-            } else {
+            if (startIndex == Position.NOPOS)
                 return new NotInFile();
+            if (endIndex == Position.NOPOS) {
+                if (tree.toString().contains("super")) {
+                    return new NotInFile();
+                } else {
+                    return new StartPos((int) lineMap.getLineNumber(startIndex),
+                            (int) lineMap.getColumnNumber(startIndex),
+                            startIndex);
+                }
             }
+
+
+            return new TreePos(
+                    (int) lineMap.getLineNumber(startIndex),
+                    (int) lineMap.getColumnNumber(startIndex),
+                    startIndex,
+                    (int) lineMap.getLineNumber(endIndex),
+                    (int) lineMap.getColumnNumber(endIndex),
+                    endIndex);
+
         }
 
         private int startLine(JCTree tree) {
@@ -455,6 +475,9 @@ public class SourceFormat {
         // either a node exist and we have start and end information or don't and we have nothing
         public record TreePos(int startLine, int startCol, int startSourceIndex, int endLine, int endCol,
                               int endSourceIndex) implements Pos {
+        }
+
+        public record StartPos(int startLine, int startCol, int startSourceIndex) implements Pos {
         }
 
         public record NotInFile() implements Pos {
@@ -496,7 +519,7 @@ public class SourceFormat {
      **************** visit tree and collect source format ******************
      *******************************************************/
 
-    // we do it before starting to transform the tree, otherwise it is a mess
+// we do it before starting to transform the tree, otherwise it is a mess
     private class CollectNodeFormat extends TreeScanner {
 
         @Override
@@ -508,6 +531,12 @@ public class SourceFormat {
         @Override
         public void visitAssign(JCTree.JCAssign tree) {
             super.visitAssign(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
+        }
+
+        @Override
+        public void visitTypeTest(JCTree.JCInstanceOf tree) {
+            super.visitTypeTest(tree);
             preComputed.put(tree, computeNodeId(tree, List.of()));
         }
 

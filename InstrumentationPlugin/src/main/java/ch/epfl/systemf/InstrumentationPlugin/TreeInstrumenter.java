@@ -1,6 +1,5 @@
 package ch.epfl.systemf.InstrumentationPlugin;
 
-import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.tree.JCTree;
@@ -8,7 +7,6 @@ import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.tree.TreeTranslator;
 import com.sun.tools.javac.util.List;
 
-import java.lang.invoke.MethodType;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Stack;
@@ -27,8 +25,11 @@ public class TreeInstrumenter extends TreeTranslator {
     private final TreeHelper.SimpleClass CALL = Logger.FileLoggerSubClasses.Call.clazz;
     private final Type callType;
 
-    private final TreeHelper.SimpleClass Flow = Logger.FileLoggerSubClasses.ControlFlow.clazz;
+    private final TreeHelper.SimpleClass Flow = Logger.FileLoggerSubClasses.DefaultControlFlow.clazz;
     private final Type flowType;
+
+    private final TreeHelper.SimpleClass FunFlow = Logger.FileLoggerSubClasses.FunControlFlow.clazz;
+    private final Type funFlowType;
 
     private final TreeHelper.SimpleClass Statement = Logger.FileLoggerSubClasses.Statment.clazz;
     private final Type statementType;
@@ -49,6 +50,7 @@ public class TreeInstrumenter extends TreeTranslator {
         statementType = helper.type(Statement);
         subStatementType = helper.type(SubStatement);
         flowType = helper.type(Flow);
+        funFlowType = helper.type(FunFlow);
         callType = helper.type(CALL);
         valueType = helper.type(Value);
     }
@@ -60,7 +62,7 @@ public class TreeInstrumenter extends TreeTranslator {
     private class Context {
         private final Stack<MethodContext> methodStack = new Stack<>();
 
-        public record MethodContext(Symbol.MethodSymbol methodSymbol, Symbol.VarSymbol methodEventGroup) {
+        public record MethodContext(Symbol.MethodSymbol methodSymbol, Symbol.VarSymbol methodEventGroup, TreeHelper.SimpleClass flowKind) {
         }
 
         public Symbol.VarSymbol enterLambda() {
@@ -69,16 +71,16 @@ public class TreeInstrumenter extends TreeTranslator {
                     helper.name("||||" + (symbolNumber++)),
                     flowType,
                     this.currentMethod().methodSymbol);
-            methodStack.push(new MethodContext(this.currentMethod().methodSymbol, methodEventGroup));
+            methodStack.push(new MethodContext(this.currentMethod().methodSymbol, methodEventGroup, Flow));
             return methodEventGroup;
         }
 
         public Symbol.VarSymbol enterMethod(Symbol.MethodSymbol methodSymbol) {
             Symbol.VarSymbol methodEventGroup = new Symbol.VarSymbol(0,
                     helper.name("||||" + (symbolNumber++)),
-                    flowType,
+                    funFlowType,
                     methodSymbol);
-            methodStack.push(new MethodContext(methodSymbol, methodEventGroup));
+            methodStack.push(new MethodContext(methodSymbol, methodEventGroup, FunFlow));
             return methodEventGroup;
         }
 
@@ -354,10 +356,10 @@ public class TreeInstrumenter extends TreeTranslator {
 
         String flowEvent = "flow";
         method.body = makeStatementSequence()
-                .executeAndBind(flowEvent, flowSymbol, (notUsed) -> logHelper.controlFlow())
-                .execute((binds) -> logHelper.enter(binds.get(flowEvent), Flow))
+                .executeAndBind(flowEvent, flowSymbol, (notUsed) -> logHelper.functionFlow(tree.name.toString()))
+                .execute((binds) -> logHelper.enter(binds.get(flowEvent), FunFlow))
                 .block(method.body)
-                .execute((binds) -> logHelper.exit(binds.get(flowEvent), Flow))
+                .execute((binds) -> logHelper.exit(binds.get(flowEvent), FunFlow))
                 .build();
 
         context.exitMethod();
@@ -431,7 +433,7 @@ public class TreeInstrumenter extends TreeTranslator {
             tree.expr = visitStatement(tree.expr);
             tree.expr = makeExpressionSequence()
                     .executeAndReturn("-", (notUsed) -> tree.expr, context.currentMethod().methodSymbol.getReturnType())
-                    .execute((notUsed) -> logHelper.exit(context.currentMethod().methodEventGroup, Flow))
+                    .execute((notUsed) -> logHelper.exit(context.currentMethod().methodEventGroup, context.currentMethod().flowKind))
                     .build();
         }
 
@@ -568,7 +570,7 @@ public class TreeInstrumenter extends TreeTranslator {
                                                 Logger.Identifier identifier = logHelper.localIdentifier("-", res.name.toString());
                                                 Logger.Value value = logHelper.valueRepr(mkTree.Ident(binding.get(resultVar)));
                                                 Logger.Write write = logHelper.write(identifier, value);
-                                                return logHelper.logSimpleExpression(format, value, List.of(write));
+                                                return logHelper.logSimpleExpression(format, List.of(write));
                                             })
                                             .build()
                             , tree.type)
