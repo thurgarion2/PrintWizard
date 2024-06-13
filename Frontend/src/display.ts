@@ -1,5 +1,6 @@
 import {
     Event,
+    ControlFlow,
     EventKind,
     EventKindTypes,
     ExecutionStepTypes,
@@ -91,9 +92,32 @@ function itemForFlow(event: EventWithContext<ItemContext, ItemState>): TraceItem
                 return empty()
         }
     })
-    return {
-        html: () => defaultBox(items)
+
+    const kind : ControlFlow = event.kind as ControlFlow
+
+    switch (kind.kind.type) {
+        case 'DefaultContext':
+            return {
+                html: () => defaultBox(items)
+            }
+        case 'FunctionContext':
+            let expandItem = textBox(PrintWizardStyle.None, "...")
+            let flowItem =  defaultBox(items)
+            const name = textBox(PrintWizardStyle.None, kind.kind.functionName)
+            offToggleBox(name,
+                () => {
+                    show(expandItem)
+                    hide(flowItem)
+                },
+                () => {
+                    hide(expandItem)
+                    show(flowItem)
+                })
+            return {
+                html: () => defaultBox([name, flowItem, expandItem])
+            }
     }
+
 }
 
 function itemForStatement(event: EventWithContext<ItemContext, ItemState>): TraceItem {
@@ -109,27 +133,9 @@ function itemForStatement(event: EventWithContext<ItemContext, ItemState>): Trac
             case 'Event':
                 switch (child.kind.type) {
                     case EventKindTypes.Flow:
-                        let flowItem = itemForFlow(child).html();
+                        return itemForFlow(child).html();
 
-                        switch (child.kind.kind.type) {
-                            case 'DefaultContext':
-                                return flowItem;
-                            case 'FunctionContext':
-                                let expandItem = textBox(PrintWizardStyle.None, "...")
-                                const name = textBox(PrintWizardStyle.None, child.kind.kind.functionName)
-                                item = defaultBox([name, flowItem, expandItem])
-                                offToggleBox(name,
-                                    () => {
-                                        show(expandItem)
-                                        hide(flowItem)
-                                    },
-                                    () => {
-                                        hide(expandItem)
-                                        show(flowItem)
-                                    })
-                                return item;
-                        }
-
+                    
                     case EventKindTypes.SubStatement:
                         item = itemForSubStatement(child).html();
                         sub.push(item)

@@ -40,12 +40,12 @@ public class FileLogger {
         return new TryCatch();
     }
 
-    public static Statment statment() {
-        return new Statment();
+    public static Statment statment(String info) {
+        return new Statment(info);
     }
 
-    public static SubStatment subStatment() {
-        return new SubStatment();
+    public static SubStatment subStatment(String info) {
+        return new SubStatment(info);
     }
 
     /********
@@ -124,18 +124,25 @@ public class FileLogger {
         }
 
         static void exit(GroupEvent event) {
+            //To handle return with complex control flow
+            //TODO make it better
+            if(event instanceof FunctionContext && !event.equals(eventStack.peek())){
+                exitUpTo(event);
+                return;
+            }
+
             traceWriter.value(eventRep(event, "end"));
             GroupEvent top = eventStack.pop();
             if (!top.equals(event))
                 throw new IllegalStateException();
         }
 
-        public default int enter() {
+        default int enter() {
             GroupEvent.enter(this);
             return 0;
         }
 
-        public default int exit() {
+        default int exit() {
             GroupEvent.exit(this);
             return 0;
         }
@@ -233,9 +240,11 @@ public class FileLogger {
 
     public static final class Statment implements GroupEvent {
         private final long eventId;
+        private String info;
 
-        private Statment() {
+        private Statment(String info) {
             eventId = nextId();
+            this.info = info;
         }
 
 
@@ -256,8 +265,10 @@ public class FileLogger {
 
     public static final class SubStatment implements GroupEvent {
         private final long eventId;
+        private String info;
 
-        private SubStatment() {
+        private SubStatment(String info) {
+            this.info = info;
             eventId = nextId();
         }
 
@@ -479,6 +490,12 @@ public class FileLogger {
      **************** Reference ******************
      *******************************************************/
 
+    static long timeStampCounter = 0;
+
+    /**************
+     ********* Instance Reference
+     **************/
+
     /********
      **** api
      ********/
@@ -492,7 +509,7 @@ public class FileLogger {
         return new InstanceReference(
                 new ClassIdentifier(clazz.getPackageName(), clazz.getSimpleName()),
                 System.identityHashCode(obj),
-                ++InstanceReference.timeStampCounter);
+                ++timeStampCounter);
     }
 
     public static InstanceReference writeReference(Object obj) {
@@ -506,8 +523,6 @@ public class FileLogger {
 
     //should only be instanced from Reference.read or Reference.write
     public record InstanceReference(ClassIdentifier clazz, int hashPointer, long timeStamp) implements Value {
-
-        static long timeStampCounter = 0;
 
         public JSONObject json() {
             return new JSONObject(Map.of(
@@ -570,6 +585,45 @@ public class FileLogger {
             return new JSONObject()
                     .put("self", self.json())
                     .put("fields", new JSONArray(fields.stream().map(Field::json).toList()));
+        }
+    }
+
+    /**************
+     ********* Array Reference
+     **************/
+
+    /********
+     **** api
+     ********/
+
+
+    // add a mechanism to save object
+    // either on first read or for each write
+    public static ArrayReference readArray(Object obj) {
+        Class<?> clazz = obj.getClass();
+        if(!clazz.isArray())
+            throw new IllegalArgumentException();
+
+        return new ArrayReference(System.identityHashCode(obj), ++timeStampCounter);
+    }
+
+    public static ArrayReference writeArray(Object obj) {
+        return readArray(obj);
+    }
+
+    /********
+     **** Array reference definition
+     ********/
+
+
+    //should only be instanced from Reference.read or Reference.write
+    public record ArrayReference(int hashPointer, long timeStamp) implements Value {
+
+        public JSONObject json() {
+            return new JSONObject(Map.of(
+                    "dataType", "arrayRef",
+                    "pointer", hashPointer,
+                    "version", timeStamp));
         }
     }
 
@@ -654,9 +708,28 @@ public class FileLogger {
             case Character c -> new Literal("char", c);
             case Byte b -> new Literal("byte", b);
             case Short s -> new Literal("short", s);
-            case Float f -> new Literal("float", f);
-            case Double d -> new Literal("double", d);
-            case Object obj -> readReference(value);
+            case Float f -> {
+                if(Float.isFinite(f)){
+                    yield new Literal("float", f);
+                }else{
+                    yield new Literal("float", "NaN");
+                }
+            }
+            case Double d -> {
+                if(Double.isFinite(d)){
+                    yield new Literal("double", d);
+                }else{
+                    yield new Literal("double", "NaN");
+                }
+            }
+            case Object obj -> {
+                Class<?> clazz = obj.getClass();
+                if (clazz.isArray()) {
+                    yield readReference(obj);
+                } else {
+                    yield readReference(value);
+                }
+            }
         };
     }
 

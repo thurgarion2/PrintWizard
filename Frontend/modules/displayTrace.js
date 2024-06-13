@@ -26,9 +26,11 @@ function allsteps(event){
     return steps;
 }
 
-function printTree(event){
+function printTree(event, upToDepth){
 
     function helper(event, depth){
+        if(depth>upToDepth)
+            return;
         level(depth, 'event :' + event.kind.type.toString())
 
         event.executions().forEach(element => {
@@ -61,6 +63,7 @@ Promise.all([initCache()])
 
        
         const rootEvent = parseEventTrace(rawTrace)    
+        //debugger;
 
 
         const eventWithContext = scopedContextTransform(

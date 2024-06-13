@@ -89,23 +89,23 @@ public class Logger {
                 List.of(mkTree.Literal(fullName)));
     }
 
-    public JCTree.JCExpression statment() {
+    public JCTree.JCExpression statment(String info) {
         JCTree.JCExpression tmp = helper.callStaticMethod(
                 FILE_Logger,
                 "statment",
-                List.nil(),
+                List.of(helper.string),
                 helper.type(FileLoggerSubClasses.Statment.clazz),
-                List.nil());
+                List.of(mkTree.Literal(info)));
         return tmp;
     }
 
-    public JCTree.JCExpression subStatment() {
+    public JCTree.JCExpression subStatment(String info) {
         return helper.callStaticMethod(
                 FILE_Logger,
                 "subStatment",
-                List.nil(),
+                List.of(helper.string),
                 helper.type(FileLoggerSubClasses.SubStatment.clazz),
-                List.nil());
+                List.of(mkTree.Literal(info)));
     }
 
     /**************

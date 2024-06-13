@@ -67,7 +67,7 @@ const exposeModule = function (req, res, path) {
         });
 };
 
-const ProjectFile = './../IntegrationTest/JumboTrace/examples/TypeTests'
+const ProjectFile = './../IntegrationTest/examples/Boids'
 const requestListener = function (req, res) {
     switch (req.url) {
         case "/":

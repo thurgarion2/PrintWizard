@@ -1,7 +1,7 @@
 import json
 from enum import Enum
 
-tracePath = './IntegrationTest/JumboTrace/examples/TypeTests/eventTrace.json'
+tracePath = './IntegrationTest/examples/Boids/eventTrace.json'
 
 EventGroupKind =  Enum('EventGroupKind', ['controlFlow', 'statement', 'subStatement'])
 class EventGroup:

@@ -14,6 +14,7 @@ export {
     Identifier,
     Data,
     Write,
+    ControlFlow,
     LocalIdentifier,
     Literal,
     FieldIdentifier,

@@ -529,6 +529,12 @@ public class SourceFormat {
         }
 
         @Override
+        public void visitUnary(JCTree.JCUnary tree) {
+            super.visitUnary(tree);
+            preComputed.put(tree, computeNodeId(tree, List.of()));
+        }
+
+        @Override
         public void visitAssign(JCTree.JCAssign tree) {
             super.visitAssign(tree);
             preComputed.put(tree, computeNodeId(tree, List.of()));

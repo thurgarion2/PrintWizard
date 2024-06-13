@@ -15,9 +15,10 @@ public class ITJumboTraceSuite {
 
     private static String JumboTrace = "JumboTrace";
     private static String Examples = "examples";
-    private static String BackMainFolder = "../../../../";
-    private static String InstrumentationPlugin = BackMainFolder + "InstrumentationPlugin/target/classes";
-    private static String FileLogger = BackMainFolder + "Logging/target/classes";
+    private static String MainFolderFromJumbo = "../../../../";
+    private static String MainFolderFromExamples = "../../../";
+    private static String InstrumentationPlugin =  "InstrumentationPlugin/target/classes";
+    private static String FileLogger = "Logging/target/classes";
     private static List<String> CommandTemplate = List.of(
             "javac",
             "-processorpath",
@@ -39,10 +40,40 @@ public class ITJumboTraceSuite {
             "-J--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED");
 
 
-    @Test
-    void compileTest() throws IOException {
+    void compileJumboTrace() throws IOException {
         copyJumboTrace();
 
+        Map<String, String> dirWithError = new HashMap<>();
+
+        jumboTraceDirectories()
+                .forEach(dir -> {
+                    List<File> javaFiles = Arrays.stream(dir
+                                    .listFiles())
+                            .filter(f -> f.getName().endsWith(".java"))
+                            .toList();
+                    if (javaFiles.size() == 1) {
+                        List<String> command = compileCommandJumbo(javaFiles);
+                        ProcessBuilder builder = new ProcessBuilder("javac", "--version")
+                                .command(command)
+                                .directory(dir);
+                        try {
+                            Process process = builder.start();
+                            String output = readOutput(process.getErrorStream());
+                            System.out.println(dir.getName());
+                            assertThat(output).isEmpty();
+                            dirWithError.put(dir.getName(), output);
+                        } catch (IOException e) {
+                            fail();
+                        }
+                    }
+                });
+
+        assertThat(dirWithError.entrySet())
+                .allMatch(p -> p.getValue().isEmpty());
+    }
+
+    @Test
+    void compileBoid(){
         Map<String, String> dirWithError = new HashMap<>();
 
         examplesDirectories()
@@ -52,7 +83,7 @@ public class ITJumboTraceSuite {
                             .filter(f -> f.getName().endsWith(".java"))
                             .toList();
                     if (javaFiles.size() == 1) {
-                        List<String> command = compileCommand(javaFiles);
+                        List<String> command = compileCommandExamples(javaFiles);
                         ProcessBuilder builder = new ProcessBuilder("javac", "--version")
                                 .command(command)
                                 .directory(dir);
@@ -73,10 +104,10 @@ public class ITJumboTraceSuite {
     }
 
     // we suppose we are in JumboTrace/examples/{example}
-    private static List<String> compileCommand(List<File> javaFiles) {
+    private static List<String> compileCommandJumbo(List<File> javaFiles) {
         List<String> command = new ArrayList<>(CommandTemplate);
-        command.set(2, command.get(2).replace("PluginPath", InstrumentationPlugin));
-        command.set(6, command.get(6).replace("LoggerPath", FileLogger));
+        command.set(2, command.get(2).replace("PluginPath", MainFolderFromJumbo +InstrumentationPlugin));
+        command.set(6, command.get(6).replace("LoggerPath", MainFolderFromJumbo +FileLogger));
         command.add(String.join(
                 " ",
                 javaFiles.stream().map(File::getName).toList()));
@@ -84,8 +115,26 @@ public class ITJumboTraceSuite {
         return command;
     }
 
-    private static Stream<File> examplesDirectories() {
+    private static List<String> compileCommandExamples(List<File> javaFiles) {
+        List<String> command = new ArrayList<>(CommandTemplate);
+        command.set(2, command.get(2).replace("PluginPath", MainFolderFromExamples+InstrumentationPlugin));
+        command.set(6, command.get(6).replace("LoggerPath", MainFolderFromExamples+FileLogger));
+        command.add(String.join(
+                " ",
+                javaFiles.stream().map(File::getName).toList()));
+
+        return command;
+    }
+
+    private static Stream<File> jumboTraceDirectories() {
         Path examples = Path.of(JumboTrace, Examples);
+
+        return Stream.of(examples.toFile().listFiles())
+                .filter(File::isDirectory);
+    }
+
+    private static Stream<File> examplesDirectories() {
+        Path examples = Path.of(Examples);
 
         return Stream.of(examples.toFile().listFiles())
                 .filter(File::isDirectory);

@@ -7,6 +7,7 @@ import com.sun.source.util.TaskEvent;
 import com.sun.source.util.TaskListener;
 import com.sun.tools.javac.api.BasicJavacTask;
 import com.sun.tools.javac.code.Symtab;
+import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeMaker;
 import com.sun.tools.javac.util.Context;
@@ -31,6 +32,7 @@ public class SampleJavacPlugin implements Plugin {
         Names names = Names.instance(ctx);
         TreeMaker mkTree = TreeMaker.instance(ctx);
         Symtab symb = Symtab.instance(ctx);
+        Types types = Types.instance(ctx);
 
         task.addTaskListener(new TaskListener() {
             @Override
@@ -39,7 +41,7 @@ public class SampleJavacPlugin implements Plugin {
                     TreeHelper instr = new TreeHelper(mkTree,names, symb);
                     Logger logHelper = new Logger(instr);
                     SourceFormat makeNodeId = new SourceFormat((JCTree.JCCompilationUnit)e.getCompilationUnit());
-                    TreeInstrumenter t = new TreeInstrumenter(logHelper, instr, makeNodeId);
+                    TreeInstrumenter t = new TreeInstrumenter(logHelper, instr, types, makeNodeId);
                     t.translate((JCTree.JCCompilationUnit)e.getCompilationUnit());
                 }
 
