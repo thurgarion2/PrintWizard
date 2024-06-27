@@ -1,5 +1,6 @@
 import java.awt.*;
 import java.awt.event.WindowAdapter;
+import java.util.ArrayList;
 import java.awt.event.WindowEvent;
 import java.util.List;
 import java.util.Random;
@@ -14,7 +15,7 @@ public class Main {
                 .limit(10)
                 .toList();
         int x = 0;
-        while(++x<3){
+        while(++x<10){
             //Thread.sleep(50);
             boids = BoidLogic.tickWorld(boids, World.physics);
         }
@@ -88,13 +89,12 @@ public class Main {
         }
 
         static Geometry.Vector2 cohesionForce(Boid thisBoid, List<Boid> boidsWithinPerceptionRadius) {
-
-            Geometry.Vector2 center = boidsWithinPerceptionRadius.stream()
-                    .map(Boid::position)
-                    .reduce(Geometry.Vector2.zero(), Geometry.Vector2::add).scale(1 / (float) boidsWithinPerceptionRadius.size());
+            Geometry.Vector2 sum = Geometry.Vector2.zero();
+            for(int i=0; i<boidsWithinPerceptionRadius.size(); ++i){
+                sum = sum.add(boidsWithinPerceptionRadius.get(i).position);
+            }
+            Geometry.Vector2 center = sum.scale(1 / (float) boidsWithinPerceptionRadius.size());
             return center.minus(thisBoid.position());
-
-
         }
 
         static Geometry.Vector2 alignmentForce(Boid thisBoid, List<Boid> boidsWithinPerceptionRadius) {
@@ -160,7 +160,11 @@ public class Main {
         }
 
         public static List<Boid> tickWorld(List<Boid> allBoids, World.Physics physics) {
-            return allBoids.stream().map(b -> tickBoid(b, allBoids, physics)).toList();
+            List<Boid> newBoids = new ArrayList<>(10);
+            for(int i=0; i<allBoids.size(); ++i){
+                newBoids.add(tickBoid(allBoids.get(i), allBoids, physics));
+            }
+            return new ArrayList<>(newBoids);
         }
     }
 

@@ -6,6 +6,7 @@ import org.json.JSONObject;
 import org.json.JSONWriter;
 
 import java.io.*;
+import java.lang.reflect.Array;
 import java.util.*;
 import java.util.stream.Stream;
 
@@ -91,7 +92,7 @@ public class FileLogger {
                     "eventType", event.type().repr
             ));
 
-            switch(event){
+            switch (event) {
                 case ControlFlow flow:
                     return switch (flow.kind()) {
                         case ControlFlowKind.Default def -> {
@@ -110,23 +111,23 @@ public class FileLogger {
             }
         }
 
-        static void exitUpTo(GroupEvent event){
-            while(!eventStack.peek().equals(event)){
+        static void exitUpTo(GroupEvent event) {
+            while (!eventStack.peek().equals(event)) {
                 exit(eventStack.peek());
             }
             exit(event);
         }
 
         static void exitAll() {
-           while(!eventStack.empty()){
-               exit(eventStack.peek());
-           }
+            while (!eventStack.empty()) {
+                exit(eventStack.peek());
+            }
         }
 
         static void exit(GroupEvent event) {
             //To handle return with complex control flow
             //TODO make it better
-            if(event instanceof FunctionContext && !event.equals(eventStack.peek())){
+            if (event instanceof FunctionContext && !event.equals(eventStack.peek())) {
                 exitUpTo(event);
                 return;
             }
@@ -153,7 +154,6 @@ public class FileLogger {
      ********/
 
 
-
     public sealed interface ControlFlow extends GroupEvent {
         ControlFlowKind kind();
 
@@ -163,9 +163,12 @@ public class FileLogger {
         }
     }
 
-    public sealed interface ControlFlowKind{
-        record Default() implements ControlFlowKind{}
-        record FunctionContext(String fullName) implements ControlFlowKind{}
+    public sealed interface ControlFlowKind {
+        record Default() implements ControlFlowKind {
+        }
+
+        record FunctionContext(String fullName) implements ControlFlowKind {
+        }
     }
 
     public final static class DefaultControlFlow implements ControlFlow {
@@ -186,7 +189,7 @@ public class FileLogger {
         private final long eventId = nextId();
         private final String fullFunctionName;
 
-        public FunctionContext(String fullFunctionName){
+        public FunctionContext(String fullFunctionName) {
             this.fullFunctionName = fullFunctionName;
         }
 
@@ -308,11 +311,11 @@ public class FileLogger {
 
     public static Call call(String nodeKey) {
 
-        return new Call(nodeKey,nextId());
+        return new Call(nodeKey, nextId());
     }
 
     public static VoidCall voidCall(String nodeKey) {
-        return new VoidCall(nodeKey,0);
+        return new VoidCall(nodeKey, 0);
     }
 
     /********
@@ -449,16 +452,16 @@ public class FileLogger {
         traceWriter.array();
 
         objectDataWriter = objectData.json;
-        objectDataWriter.object();
+        objectDataWriter.array();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             GroupEvent.exitAll();
-            
+
             try {
                 traceWriter.endArray();
                 traceWriter.endObject();
 
-                objectDataWriter.endObject();
+                objectDataWriter.endArray();
 
                 trace.close();
                 objectData.close();
@@ -503,17 +506,33 @@ public class FileLogger {
 
     // add a mechanism to save object
     // either on first read or for each write
+    private static final Set<Integer> objHash = new HashSet<>();
+
     public static InstanceReference readReference(Object obj) {
+        int hash = System.identityHashCode(obj);
+        InstanceReference ref = reference(obj);
+        if (!objHash.contains(hash)) {
+            objHash.add(hash);
+            ObjectData.saveObject(ref, obj);
+        }
+
+        return reference(obj);
+    }
+
+
+    public static InstanceReference writeReference(Object obj) {
+        InstanceReference ref = reference(obj);
+        ObjectData.saveObject(ref, obj);
+        return ref;
+    }
+
+    private static InstanceReference reference(Object obj) {
         Class<?> clazz = obj.getClass();
 
         return new InstanceReference(
                 new ClassIdentifier(clazz.getPackageName(), clazz.getSimpleName()),
                 System.identityHashCode(obj),
                 ++timeStampCounter);
-    }
-
-    public static InstanceReference writeReference(Object obj) {
-        return readReference(obj);
     }
 
     /********
@@ -559,7 +578,6 @@ public class FileLogger {
                     })
                     .toList();
             ObjectData data = new ObjectData(ref, fs);
-            objectDataWriter.key(ref.hashPointer + "-" + ref.timeStamp);
             objectDataWriter.value(data.json());
         }
 
@@ -577,7 +595,7 @@ public class FileLogger {
             public JSONObject json() {
                 return new JSONObject()
                         .put("identifier", identifier.json())
-                        .put("value", valueRepr(value));
+                        .put("value", valueRepr(value).json());
             }
         }
 
@@ -597,18 +615,32 @@ public class FileLogger {
      ********/
 
 
-    // add a mechanism to save object
-    // either on first read or for each write
-    public static ArrayReference readArray(Object obj) {
-        Class<?> clazz = obj.getClass();
-        if(!clazz.isArray())
-            throw new IllegalArgumentException();
+    private static final Set<Integer> arrayHash = new HashSet<>();
 
-        return new ArrayReference(System.identityHashCode(obj), ++timeStampCounter);
+    public static ArrayReference readArray(Object obj) {
+        ArrayReference ref = arrayRef(obj);
+        if(!arrayHash.contains(ref.hashPointer)){
+            arrayHash.add(ref.hashPointer);
+            ArrayData.saveArray(ref, obj);
+        }
+        return ref;
     }
 
     public static ArrayReference writeArray(Object obj) {
-        return readArray(obj);
+        ArrayReference ref = arrayRef(obj);
+        ArrayData.saveArray(ref, obj);
+        return ref;
+    }
+
+    public static ArrayReference arrayRef(Object obj) {
+        Class<?> clazz = obj.getClass();
+        if (!clazz.isArray())
+            throw new IllegalArgumentException();
+
+        return new ArrayReference(
+                System.identityHashCode(obj),
+                ++timeStampCounter,
+                clazz.arrayType().toString());
     }
 
     /********
@@ -617,13 +649,33 @@ public class FileLogger {
 
 
     //should only be instanced from Reference.read or Reference.write
-    public record ArrayReference(int hashPointer, long timeStamp) implements Value {
+    public record ArrayReference(int hashPointer, long timeStamp, String elemType) implements Value {
 
         public JSONObject json() {
             return new JSONObject(Map.of(
                     "dataType", "arrayRef",
+                    "elemType", elemType,
                     "pointer", hashPointer,
                     "version", timeStamp));
+        }
+    }
+
+    public record ArrayData(ArrayReference ref, List<Value> values) implements JsonSerializable {
+
+        public static void saveArray(ArrayReference ref, Object array) {
+            int length = Array.getLength(array);
+            List<Value> values = new ArrayList<>();
+            for (int i = 0; i < length; ++i) {
+                values.add(valueRepr(Array.get(array, i)));
+            }
+            objectDataWriter.value(new ArrayData(ref, values).json());
+        }
+
+        @Override
+        public JSONObject json() {
+            return new JSONObject()
+                    .put("self", ref.json())
+                    .put("values", new JSONArray(values.stream().map(JsonSerializable::json).toList()));
         }
     }
 
@@ -709,23 +761,23 @@ public class FileLogger {
             case Byte b -> new Literal("byte", b);
             case Short s -> new Literal("short", s);
             case Float f -> {
-                if(Float.isFinite(f)){
+                if (Float.isFinite(f)) {
                     yield new Literal("float", f);
-                }else{
+                } else {
                     yield new Literal("float", "NaN");
                 }
             }
             case Double d -> {
-                if(Double.isFinite(d)){
+                if (Double.isFinite(d)) {
                     yield new Literal("double", d);
-                }else{
+                } else {
                     yield new Literal("double", "NaN");
                 }
             }
             case Object obj -> {
                 Class<?> clazz = obj.getClass();
                 if (clazz.isArray()) {
-                    yield readReference(obj);
+                    yield readArray(obj);
                 } else {
                     yield readReference(value);
                 }

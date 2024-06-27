@@ -191,7 +191,7 @@ public class Logger {
     public InstanceReference writeReference(JCTree.JCExpression obj) {
         return new InstanceReference(helper.callStaticMethod(
                 FILE_Logger,
-                "readReference",
+                "writeReference",
                 List.of(helper.objectP),
                 helper.type(FileLoggerSubClasses.InstanceReference.clazz),
                 List.of(obj)));

@@ -23,6 +23,16 @@
     margin-bottom: 1px;
 }
 
+.flex_row {
+    display: flex;
+    flex-direction: raw;
+}
+
+.flex_col {
+    display: flex;
+    flex-direction: column;
+}
+
 
 
 .code {

@@ -1,6 +1,16 @@
 import { SourceFormatDescription, parseSourceFormatDescription } from "./event"
-
-export { initCache, sourceCodeCache, traceCache, objectDataCache }
+import { parseObjectStore, Store } from "./objectStore"
+export { 
+    initCache, 
+    sourceCodeCache, 
+    traceCache, 
+    objectDataCache, 
+    Result, 
+    Success, 
+    Failure,
+    failure,
+    success
+}
 
 
 /*******************************************************
@@ -32,7 +42,7 @@ interface DataCache<A> {
 
 let sourceCode: DataCache<SourceFormatDescription>
 let trace: DataCache<any>
-let objectData: DataCache<any>
+let objectData: DataCache<Store>
 
 /**************
  ********* Functions
@@ -53,7 +63,7 @@ function traceCache(): DataCache<any> {
     return trace
 }
 
-function objectDataCache(): DataCache<any> {
+function objectDataCache(): DataCache<Store> {
     return objectData
 }
 
@@ -101,6 +111,9 @@ function fetchSourceObjectData() {
     return fetch('objectData')
         .then(response => {
             return response.json()
+        })
+        .then(json => {
+            return parseObjectStore(json)
         })
 }
 

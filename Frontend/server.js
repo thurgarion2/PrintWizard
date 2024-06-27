@@ -94,6 +94,9 @@ const requestListener = function (req, res) {
         case "/treeTransforms":
             exposeModule(req, res, './build/treeTransforms.js');
             break;
+        case "/objectStore":
+            exposeModule(req, res, './build/objectStore.js');
+            break;
         case "/display":
             exposeModule(req, res, './build/display.js');
             break;

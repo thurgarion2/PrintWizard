@@ -271,18 +271,22 @@ public class TreeInstrumenter extends TreeTranslator {
 
     @Override
     public void visitForLoop(JCTree.JCForLoop tree) {
-        super.visitForLoop(tree);
-        JCTree.JCForLoop loop = (JCTree.JCForLoop) this.result;
+        tree.init = translate(tree.init);
+        tree.cond = visitStatement(tree.cond);
+        tree.step = translate(tree.step);
+        tree.body = translate(tree.body);
+
 
         String flowEvent = "flow";
 
-        assertBlock(loop.body);
-        loop.body = makeStatementSequence()
+        assertBlock(tree.body);
+        tree.body = makeStatementSequence()
                 .executeAndBind(flowEvent, (notUsed) -> logHelper.controlFlow(), flowType)
                 .execute((binds) -> logHelper.enter(binds.get(flowEvent), Flow))
-                .block((JCTree.JCBlock) loop.body)
+                .block((JCTree.JCBlock) tree.body)
                 .execute((binds) -> logHelper.exit(binds.get(flowEvent), Flow))
                 .build();
+        this.result = tree;
     }
 
     @Override
@@ -644,9 +648,7 @@ public class TreeInstrumenter extends TreeTranslator {
                 super.visitUnary(unary);
                 JCTree.JCUnary res = (JCTree.JCUnary) this.result;
 
-                res.arg = makeExpressionSequence()
-                        .subStatementAndReturn(this, "-", (notUsed) -> res.arg, res.type)
-                        .build();
+
                 yield makeExpressionSequence()
                         .statementAndReturn(this, "-", (notUsed) -> logExecutionStep(res), res.type)
                         .build();
@@ -890,7 +892,9 @@ public class TreeInstrumenter extends TreeTranslator {
                     newClass.args = argsName.map(name -> mkTree.Ident(binds.get(name)));
                     return newClass;
                 }, newClass.type)
-                .execute((binds) -> logHelper.logReturn(binds.get(callEvent), logHelper.valueRepr(mkTree.Ident(binds.get(res)))))
+                .execute((binds) -> logHelper.logReturn(
+                        binds.get(callEvent),
+                        new Logger.Value(logHelper.writeReference(mkTree.Ident(binds.get(res))).ref())))
                 .build();
     }
 
@@ -923,7 +927,7 @@ public class TreeInstrumenter extends TreeTranslator {
         return makeExpressionSequence()
                 .executeAndReturn(res, (notUsed) -> assign, assign.type)
                 .execute((binds) -> {
-                    //TODO compute value only 1 time
+                    //TODO compute value only 1 time [optimization]
                     Logger.Identifier identifier = logHelper.localIdentifier("-", assign.lhs.toString());
                     Logger.Value value = logHelper.valueRepr(mkTree.Ident(binds.get(res)));
                     Logger.Write write = logHelper.write(identifier, value);

@@ -23,10 +23,12 @@ export {
     DataType,
     ArgsValues,
     InstanceReference,
+    ArrayReference,
     EventKindTypes,
     parseEventTrace,
     valueFromJson,
-    findNodeSynthax
+    findNodeSynthax,
+    FunctionContext
 }
 
 import { sourceCodeCache } from "./fetch"
@@ -407,6 +409,7 @@ function typeFromString(stepType: any): StepType {
 enum DataType {
     StaticReference = "staticRef",
     InstanceRef = "instanceRef",
+    ArrayReference = "arrayRef",
     LocalIdentifier = "localIdentifier",
     FieldIdentifier = "fieldIdentifier",
     Write = "write",
@@ -707,7 +710,7 @@ function dataFromJson(json: any): Data {
 ********* Value
 **************/
 
-type Value = Literal | InstanceReference;
+type Value = Literal | InstanceReference | ArrayReference;
 
 /********
 **** types
@@ -737,7 +740,8 @@ function valueFromJson(json: any): Value {
         case "short": return { dataType: DataType.Literal, kind: 'short', value: readJsonField(valueField, json) };
         case "float": return { dataType: DataType.Literal, kind: 'float', value: readJsonField(valueField, json) };
         case "double": return { dataType: DataType.Literal, kind: 'double', value: readJsonField(valueField, json) };
-        case "instanceRef": return instanceRefFromJson(json);
+        case DataType.InstanceRef: return instanceRefFromJson(json);
+        case DataType.ArrayReference: return arrayRefFromJson(json);
         default: return unableToParse(json);
     }
 }
@@ -762,6 +766,13 @@ type InstanceReference = {
 type StaticReference = {
     dataType: DataType.StaticReference,
     className: ClassIdentifier,
+    version: number
+}
+
+type ArrayReference = {
+    dataType: DataType.ArrayReference,
+    elemType: string,
+    pointer: number,
     version: number
 }
 
@@ -808,6 +819,20 @@ function instanceRefFromJson(json: any): InstanceReference {
                 className: readJsonField(clazzField, json),
                 pointer: readJsonField("pointer", json),
                 version: readJsonField(versionField, json)
+            }
+        default:
+            return unableToParse(json)
+    }
+}
+
+function arrayRefFromJson(json :any):ArrayReference {
+    switch (readJsonField(typeField, json)) {
+        case DataType.ArrayReference:
+            return {
+                dataType: DataType.ArrayReference,
+                pointer: readJsonField("pointer", json),
+                version: readJsonField(versionField, json),
+                elemType: readJsonField("elemType", json)
             }
         default:
             return unableToParse(json)

@@ -1,14 +1,12 @@
 import java.lang.reflect.Array;
+import java.util.ArrayList;
 
 public class BasicOperation {
 
     public static void main(String[] args) {
-        Foo.f();
-        A a = new A();
-        a.f();
-
-        Object o = null;
-        boolean x = false;
+        ArrayList<Integer> arr = new ArrayList<>();
+        Class<?> clazz = arr.getClass();
+        System.out.println(clazz.isArray());
 
 
     }

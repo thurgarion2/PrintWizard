@@ -4,7 +4,7 @@ import {
     propagateItemContext,
     aggregateItemState,
     initialContext,
-    itemForFlow
+    toStepGroup
 } from './display'
 import { parseEventTrace } from './event'
 
@@ -71,8 +71,9 @@ Promise.all([initCache()])
             initialContext,
             aggregateItemState,
             propagateItemContext);
-        
-        injectNode.appendChild(itemForFlow(eventWithContext).html())
+        const root = toStepGroup(eventWithContext)
+        root.expand()
+        injectNode.appendChild(root.html)
     
     })
     .catch(error => {
