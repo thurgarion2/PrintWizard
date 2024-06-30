@@ -1,3 +1,8 @@
+body {
+    font-family: monospace;
+}
+
+
 #trace-display{
     margin-left: 50px;
 }
@@ -54,6 +59,8 @@
     display: inline;
     margin-left: 2px;
     margin-right: 2px;
+    padding-left: 2px;
+    padding-right: 2px;
     background-color: #CAC7C7;
     border-radius: 3px;
 }
@@ -62,7 +69,8 @@
     display: inline-block;
     margin-left: 2px;
     margin-right: 2px;
-    padding: 2px;
+    padding-left: 2px;
+    padding-right: 2px;
     background-color: #FF0000;
     border-radius: 3px;
 }
@@ -71,7 +79,8 @@
     display: inline-block;
     margin-left: 2px;
     margin-right: 2px;
-    padding: 2px;
+    padding-left: 2px;
+    padding-right: 2px;
     background-color: #00A79F;
     border-radius: 3px;
 }
@@ -89,6 +98,6 @@
 }
 
 .button {
-    border: 2mm ridge;
+    border:  ridge;
     display: inline-block;
 }
