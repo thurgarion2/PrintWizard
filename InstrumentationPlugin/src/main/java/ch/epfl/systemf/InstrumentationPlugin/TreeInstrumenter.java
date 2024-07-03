@@ -135,11 +135,6 @@ public class TreeInstrumenter extends TreeTranslator {
     }
 
 
-    @Override
-    public void visitAnnotatedType(JCTree.JCAnnotatedType tree) {
-        System.out.println("visitAnnotatedType");
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public void visitApply(JCTree.JCMethodInvocation tree) {
@@ -247,11 +242,6 @@ public class TreeInstrumenter extends TreeTranslator {
                 .build();
     }
 
-    @Override
-    public void visitErroneous(JCTree.JCErroneous tree) {
-        System.out.println("visitErroneous");
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public void visitForeachLoop(JCTree.JCEnhancedForLoop tree) {
@@ -439,11 +429,6 @@ public class TreeInstrumenter extends TreeTranslator {
         this.result = tree;
     }
 
-    @Override
-    public void visitSkip(JCTree.JCSkip tree) {
-        System.out.println("visitSkip");
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public void visitSwitch(JCTree.JCSwitch tree) {

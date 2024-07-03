@@ -370,7 +370,7 @@ public class SourceFormat {
                 //suffix
                 SourceCode.Range startLineRange = source.line(pos.startLine);
                 SourceCode.Range endLineRange = source.line(pos.endLine);
-                addText(expression, pos.endSourceIndex, endLineRange.end);
+
 
 
                 NodeSourceFormat nodeFormat = new PresentInSourceCode(

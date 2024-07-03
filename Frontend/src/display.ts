@@ -756,7 +756,7 @@ function displayValue(value: Value, actions: DisplayReferenceData): Node {
                 }
 
             }
-            if (value.className.className === 'Boid_') {
+            if (value.className.className === 'Boid') {
                 const res = searchObject(value)
 
                 if(res.type==='success'){
@@ -797,7 +797,8 @@ function emojiUnicode(n: number): string {
     const nbEmojis = EmojiEnd - EmojiStart + 1;
     const codePoint = (n % nbEmojis) + EmojiStart;
 
-    return String.fromCodePoint(codePoint);
+    return '';
+    //return String.fromCodePoint(codePoint);
 }
 
 

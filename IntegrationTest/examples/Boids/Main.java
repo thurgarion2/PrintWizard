@@ -15,7 +15,7 @@ public class Main {
                 .limit(10)
                 .toList();
         int x = 0;
-        while(++x<10){
+        while(++x<12){
             //Thread.sleep(50);
             boids = BoidLogic.tickWorld(boids, World.physics);
         }
@@ -140,7 +140,7 @@ public class Main {
             Geometry.Vector2 contain = containmentForce(thisBoid, allBoids, World.Physics.WIDTH, World.Physics.HEIGHT);
 
             return avoid.scale(physics.avoidanceWeight())
-                    .add(cohere.scale(physics.containmentWeight()))
+                    .add(cohere.scale(physics.cohesionWeight()))
                     .add(align.scale(physics.alignmentWeight()))
                     .add(contain.scale(physics.containmentWeight()));
         }
@@ -169,21 +169,21 @@ public class Main {
     }
 
     static public class World {
-        static Random rand = new Random(2014);
+        static Random rand = new Random(4);
         static World.Physics physics = new World.Physics(
-                4f,
-                20f,
+                2f,
+                8f,
                 80f,
                 15f,
                 1f,
                 0.001f,
                 0.027f,
-                0.2f);
+                0.5f);
 
 
         static Boid createRandomBoid() {
-            float x = randomFromRange(0, World.Physics.WIDTH/4);
-            float y = randomFromRange(0, World.Physics.HEIGHT/4);
+            float x = randomFromRange((float) Physics.WIDTH /3, (float) (Physics.WIDTH * 2) /3);
+            float y = randomFromRange((float) Physics.HEIGHT /3, (float) Physics.HEIGHT*2/3);
             float rotation = randomFromRange(0, (float) (2 * Math.PI));
             float initialSpeed = randomFromRange(physics.maximumSpeed(), physics.maximumSpeed());
             Geometry.Vector2 initialVelocity = Geometry.Vector2.UnitUp().rotate(rotation).scale(initialSpeed);
