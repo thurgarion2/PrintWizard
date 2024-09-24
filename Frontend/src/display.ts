@@ -743,37 +743,7 @@ function displayValue(value: Value, actions: DisplayReferenceData): Node {
             const repr = value.kind === "null" ? "null" : value.value.toString()
             return textEl(repr);
         case DataType.InstanceRef:
-            if (value.className.className === 'Vector2') {
-                const res = searchObject(value)
 
-                if(res.type==='success'){
-                    const vectorData = res.payload as ObjectData
-                    const x = vectorData.fields[0].value as Literal
-                    const y = vectorData.fields[1].value as Literal
-                    return box(PrintWizardStyle.None, [
-                        textEl("Vector["+x.value.toString()+", "+y.value.toString()+"]")
-                    ])
-                }
-
-            }
-            if (value.className.className === 'Boid') {
-                const res = searchObject(value)
-
-                if(res.type==='success'){
-                    const boidData = res.payload as ObjectData
-                    const pos = boidData.fields[0].value as InstanceReference
-                    const speed = boidData.fields[1].value as InstanceReference
-                    return box(PrintWizardStyle.None, [
-                        referenceHtml(value),
-                        textEl("[position : "),
-                        displayValue(pos, { inspect : (x) => {}}),
-                        textEl(",velocity : "),
-                        displayValue(speed, { inspect : (x) => {}}),
-                        textEl("]")
-                    ])
-                }
-
-            }
             return clickAction(
                 [referenceHtml(value)],
                 () => { actions.inspect(value) }
@@ -797,8 +767,7 @@ function emojiUnicode(n: number): string {
     const nbEmojis = EmojiEnd - EmojiStart + 1;
     const codePoint = (n % nbEmojis) + EmojiStart;
 
-    return '';
-    //return String.fromCodePoint(codePoint);
+    return String.fromCodePoint(codePoint);
 }
 
 

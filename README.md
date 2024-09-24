@@ -10,7 +10,8 @@ New kind of tool, records every events that occurs in a program execution and le
 
 ## compile PrintWizard
 
-Compile PrintWizard with maven, it will also execute tests.
+- Compile PrintWizard with maven, it will also execute tests.
+- Compile frontend with typescript, example : `npx tsc -w`
 
 ## Setup
 - openjdk 21.0.3
